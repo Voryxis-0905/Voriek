@@ -31,4 +31,4 @@ On macOS/Linux, use `source .venv/bin/activate`. If PowerShell scripts are restr
 - Preserve compatibility with existing saves, or document a migration path. Prompt changes are behavior changes and need their own evaluation.
 - Automated tests must not require API keys or call live AI providers.
 
-The repository does not yet have a public release license. Before publishing it publicly, choose a license, review sample data, and complete release documentation. This document does not grant permission to use the code.
+This repository is licensed under the MIT License - see LICENSE. Before publishing new releases, review sample data and keep release documentation current.
