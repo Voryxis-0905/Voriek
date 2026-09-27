@@ -12,12 +12,15 @@ from .narration import EXPERIMENTAL_WRITER_SYSTEM_PROMPT
 from .narration import EXTRACTOR_SYSTEM_PROMPT
 from .editing import CREATOR_ASSISTANT_PROMPT
 from .editing import CONSISTENCY_CHECKER_SYSTEM_PROMPT
+from .editing import ENSEMBLE_CONSISTENCY_CHECKER_SYSTEM_PROMPT
 from .editing import SUMMARIZER_SYSTEM_PROMPT
 from .editing import LINTER_SYSTEM_PROMPT
 from .editing import REWRITE_SYSTEM_PROMPT
 from .editing import EDITOR_SYSTEM_PROMPT
 from .psychology import PSYCHOLOGY_PERCEPTION_PROMPT
 from .psychology import PSYCHOLOGY_UPDATE_PROMPT
+from .psychology import EXPERIMENTAL_PSYCHOLOGY_PERCEPTION_PROMPT
+from .psychology import EXPERIMENTAL_PSYCHOLOGY_UPDATE_PROMPT
 from .bookends import PRELUDE_WRITER_PROMPT
 from .bookends import PRELUDE_VALIDATOR_PROMPT
 from .bookends import EPILOGUE_CHOICES_PROMPT

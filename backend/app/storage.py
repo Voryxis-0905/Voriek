@@ -28,7 +28,7 @@ os.makedirs(WORLDS_DIR, exist_ok=True)
 RUNTIME_CONFIG_PATH = os.path.join(DATA_DIR, "runtime_config.json")
 DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-chat"
 
-_VALID_ROLES = frozenset({"planner", "writer", "extractor", "editor", "checker", "summarizer"})
+_VALID_ROLES = frozenset({"planner", "actor", "writer", "extractor", "editor", "checker", "summarizer"})
 
 
 class WorldFileUnreadable(Exception):

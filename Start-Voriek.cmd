@@ -7,7 +7,7 @@ if not exist ".venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
-echo Story Engine: http://localhost:5173
+echo Voriek: http://localhost:5173
 echo Keep this window open. Press Ctrl+C to stop both services.
 call npm.cmd run dev
 pause

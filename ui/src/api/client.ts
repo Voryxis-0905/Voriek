@@ -7,9 +7,10 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
  * never mentions a mode takes exactly the path it took before this option
  * existed. `experimental` opts a single turn into the alternative
  * planner/writer guidance; it changes only narrative guidance, never the
- * engine's rules, and it does not add any model calls.
+ * engine's rules, and it does not add any model calls. `ensemble` keeps that
+ * pacing profile but adds one perspective-limited actor call per present NPC.
  */
-export type NarrationMode = 'classic' | 'experimental';
+export type NarrationMode = 'classic' | 'experimental' | 'ensemble';
 
 /** The only value worth sending; `classic` means "leave the field out". */
 export const EXPERIMENTAL_NARRATION_MODE: NarrationMode = 'experimental';
@@ -297,7 +298,7 @@ export const api = {
       fetchJSON<ChapterContinueResponse>(`/worlds/${worldName}/time-skip/execute`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req),
       }),
-    regenerate: (worldName: string, opts?: { requestId?: string; expectedRevision?: number; narrationMode?: NarrationMode }) =>
+    regenerate: (worldName: string, opts?: { requestId?: string; expectedRevision?: number; narrationMode?: NarrationMode; userInput?: string }) =>
       fetchJSON<any>(`/worlds/${worldName}/chapter/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -305,6 +306,7 @@ export const api = {
           request_id: opts?.requestId,
           expected_revision: opts?.expectedRevision,
           narration_mode: opts?.narrationMode,
+          user_input: opts?.userInput,
         }),
       }),
     endgameStatus: (worldName: string) =>

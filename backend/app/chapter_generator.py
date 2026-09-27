@@ -23,6 +23,7 @@ from app.story.consistency import build_consistency_checker_payload
 from app.story.consistency import build_consistency_correction_note
 from app.story.consistency import parse_checker_response
 from app.story.consistency import run_consistency_checker
+from app.story.consistency import recent_confirmed_scenes
 from app.story.consistency import run_extractor_cross_check
 from app.story.entities import _validate_imported_package
 from app.story.entities import deduplicate_entity
@@ -45,6 +46,15 @@ from app.story.memory import update_running_summary
 from app.story.pacing import CHAPTER_HARD_CLOSE_TURNS
 from app.story.pacing import CHAPTER_SOFT_CLOSE_TURNS
 from app.story.observer import scene_participants
+from app.story.observer import completed_scene_witnesses
+from app.story.observer import character_mention_offset
+from app.story.narration_mode import is_experimental
+from app.story.narration_mode import is_ensemble
+from app.story.ensemble import (
+    build_committed_scene_record,
+    project_scene_payload,
+    call_actor_stages,
+)
 from app.story.views import narrative_character_view
 from app.story.pacing import CHAPTER_SOFT_CLOSE_WORDS
 from app.story.pacing import CHAPTER_SUMMARY_BUDGET_CEIL
@@ -73,6 +83,26 @@ import os
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+def _recent_confirmed_turns(chapters_data: dict, witness_id: str,
+                            limit: int = 4) -> list:
+    """Only this NPC's recorded perceptions from recent committed turns."""
+    result = []
+    for turn in chapters_data.get("chapters", [])[-limit:]:
+        if not isinstance(turn, dict):
+            continue
+        status = turn.get("psychology_status") or {}
+        if not isinstance(status, dict) or witness_id not in (status.get("subjects") or []):
+            continue
+        perception = (turn.get("perception_data") or {}).get(witness_id)
+        if not isinstance(perception, dict) or not perception.get("perception"):
+            continue
+        result.append({
+            "prior_perception": str(perception["perception"])[:800],
+            "prior_decision": str(perception.get("decision") or "")[:300],
+        })
+    return result
 
 
 @locked_world
@@ -459,6 +489,12 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
         "user_input": narrator_input
     }
 
+    if is_ensemble(narration_mode):
+        base_payload = project_scene_payload(
+            base_payload, character_state.get("characters", {}),
+            merged_canon.get("facts", []), protagonist_id,
+        )
+
     _editor_enabled = _get_effective_editor_enabled(world_name)
     planner_out = call_planner_stage(base_payload, narrator_input, world_name=world_name,
                                      narration_mode=narration_mode)
@@ -471,6 +507,18 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
     is_ooc = planner_out["is_ooc"]
     action_translation = planner_out["action_translation"]
     effective_user_input = planner_out["effective_user_input"]
+    scene_direction = planner_out["scene_direction"]
+    if is_ensemble(narration_mode):
+        # The planner can frame the beat, but each NPC supplies their own
+        # proposed behavior from a separate, perspective-bounded call.
+        scene_direction.pop("actors", None)
+        base_payload["actor_cues"] = call_actor_stages(
+            character_state.get("characters", {}), participants, protagonist_id,
+            planner_out["actor_observation"], scene_location, world_name,
+            merged_canon.get("facts", []),
+            {actor_id: _recent_confirmed_turns(chapters_data, actor_id)
+             for actor_id in participants if actor_id != protagonist_id},
+        )
 
     foreshadowing_tracker_clean = world_config.get("foreshadowing_tracker", [])
     if not isinstance(foreshadowing_tracker_clean, list):
@@ -486,7 +534,7 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
         suggested_actions, anchor_keywords, open_threads_update,
         is_ooc, action_translation, effective_user_input,
         world_name=world_name, editor_enabled=_editor_enabled,
-        narration_mode=narration_mode
+        narration_mode=narration_mode, scene_direction=scene_direction
     )
 
     boundary_correction = None
@@ -510,7 +558,7 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             suggested_actions, anchor_keywords, open_threads_update,
             is_ooc, action_translation, effective_user_input,
             world_name=world_name, editor_enabled=_editor_enabled,
-            narration_mode=narration_mode
+            narration_mode=narration_mode, scene_direction=scene_direction
         )
 
         violations_after_retry = [] if boundary_advisory else check_boundary_violations(state_changes, checkpoint)
@@ -534,9 +582,12 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
                 "note": "Narrator rewrote correctly within scope after being reminded."
             }
 
+    checker_scenes = recent_confirmed_scenes(chapters_data) if is_ensemble(narration_mode) else None
+    checker_characters = (narrative_character_view(active_characters_state)
+                          if is_ensemble(narration_mode) else narrative_characters)
     checker_result = run_consistency_checker(
         chapter_text, state_changes, world_config, checkpoint,
-        active_cards, narrative_characters, world_name=world_name,
+        active_cards, checker_characters, world_name=world_name,
         engine_outcomes={
             "action_resolution": action_resolution,
             "inventory_resolution": inventory_resolution,
@@ -544,6 +595,7 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             "time_skip_resolution": time_skip_resolution,
             "opening_setup": opening_setup,
         },
+        recent_scenes=checker_scenes,
     )
     consistency_rewritten = False
     if checker_result["status"] == "failed":
@@ -554,7 +606,7 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             suggested_actions, anchor_keywords, open_threads_update,
             is_ooc, action_translation, effective_user_input,
             world_name=world_name, editor_enabled=_editor_enabled,
-            narration_mode=narration_mode
+            narration_mode=narration_mode, scene_direction=scene_direction
         )
         consistency_rewritten = True
 
@@ -576,7 +628,7 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
         # never mark a rewrite as passed without running the checker again.
         checker_result = run_consistency_checker(
             chapter_text, state_changes, world_config, checkpoint,
-            active_cards, narrative_characters, world_name=world_name,
+            active_cards, checker_characters, world_name=world_name,
             engine_outcomes={
                 "action_resolution": action_resolution,
                 "inventory_resolution": inventory_resolution,
@@ -584,6 +636,7 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
                 "time_skip_resolution": time_skip_resolution,
                 "opening_setup": opening_setup,
             },
+            recent_scenes=checker_scenes,
         )
 
     unchecked_commit_allowed = (
@@ -777,11 +830,36 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
     psychology_status = {"status": "disabled"}
     if world_config.get("psychology_enabled", True):
         from app.story.observer import psychology_subjects
-        psych_subjects = psychology_subjects(participants, protagonist_id)
+        psych_participants = participants
+        recent_confirmed_turns = []
+        if is_experimental(narration_mode):
+            protagonist_after = character_state["characters"].get(protagonist_id, {})
+            end_location = protagonist_after.get("location", scene_location)
+            psych_participants = completed_scene_witnesses(
+                participants, character_state, end_location, chapter_text,
+                protagonist_id=protagonist_id,
+                allowed_ids=set(active_characters_state.keys()),
+                max_observers=world_config.get("psychology_max_npc_per_turn", 6),
+            )
+            scene_location = end_location
+        psych_subjects = psychology_subjects(psych_participants, protagonist_id)
+        if is_experimental(narration_mode):
+            recent_confirmed_turns = {
+                char_id: _recent_confirmed_turns(chapters_data, char_id)
+                for char_id in psych_subjects
+            }
+        observed_texts = {}
+        if is_experimental(narration_mode):
+            for char_id in psych_subjects:
+                if char_id in participants:
+                    continue
+                first_mention = character_mention_offset(chapter_text, char_id, psych_participants)
+                if first_mention >= 0:
+                    observed_texts[char_id] = chapter_text[first_mention:]
         psychology_status = {
             "status": "ran" if psych_subjects else "skipped",
             "scene_location": scene_location,
-            "participants": list(participants.keys()),
+            "participants": list(psych_participants.keys()),
             "subjects": list(psych_subjects.keys()),
         }
         if psych_subjects:
@@ -791,14 +869,20 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
                     chapter_text,
                     world_config,
                     checkpoint,
-                    world_name=world_name
+                    world_name=world_name,
+                    narration_mode=narration_mode,
+                    recent_confirmed_turns=recent_confirmed_turns,
+                    observed_chapter_text_by_character=observed_texts,
                 )
                 psych_updates = update_psychologies_for_all_characters(
                     psych_subjects,
                     chapter_text,
                     perceptions,
                     world_config,
-                    world_name=world_name
+                    world_name=world_name,
+                    narration_mode=narration_mode,
+                    recent_confirmed_turns=recent_confirmed_turns,
+                    observed_chapter_text_by_character=observed_texts,
                 )
                 character_state["characters"] = apply_psychology_changes(
                     character_state["characters"],
@@ -817,7 +901,7 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
                     "status": "error",
                     "reason": str(e),
                     "scene_location": scene_location,
-                    "participants": list(participants.keys()),
+                    "participants": list(psych_participants.keys()),
                     "subjects": list(psych_subjects.keys()),
                 }
                 logger.warning(f"Psychology runtime failed for world={world_name}: {e}")
@@ -830,6 +914,26 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
 
     this_ooc_scope = "branch_local" if is_ooc else None
 
+    scene_record = None
+    chapter_notes = state_changes.get("notes", "")
+    if is_ensemble(narration_mode):
+        # The published scene and applied engine state are the durable record.
+        # A free-form model synopsis can contradict the scene and must not be
+        # replayed as continuity evidence on a later turn.
+        chapter_notes = ""
+        changed_characters = state_changes.get("characters", {})
+        if not isinstance(changed_characters, dict):
+            changed_characters = {}
+        scene_record = build_committed_scene_record(
+            character_state,
+            set(participants) | set(changed_characters),
+            action_resolution,
+            inventory_resolution,
+            travel_resolution,
+            time_skip_resolution,
+            elapsed_time_resolution,
+        )
+
     chapter_record = {
         "chapter_index": this_chapter_index,
         "turn_index": this_turn_index,
@@ -838,7 +942,8 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
         "checkpoint_id": current_checkpoint_id,
         "user_input": display_input,
         "chapter_text": chapter_text,
-        "notes": state_changes.get("notes", ""),
+        "notes": chapter_notes,
+        **({"scene_record": scene_record} if scene_record is not None else {}),
         "boundary_correction": boundary_correction,
         "psychology_status": psychology_status,
         "action_resolution": action_resolution,
@@ -1011,9 +1116,14 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             world_name, chapter_text, existing_facts, world_config
         )
 
+    applied_state_changes = state_changes
+    if is_ensemble(narration_mode):
+        applied_state_changes = dict(state_changes)
+        applied_state_changes.pop("notes", None)
+
     response = {
         "chapter": chapter_record,
-        "state_changes_applied": state_changes,
+        "state_changes_applied": applied_state_changes,
         "used_mock_llm": not has_real_api_key(world_name),
         "checkpoint_advanced": checkpoint_advanced,
         "lore_rag_filter": lore_rag_filter,

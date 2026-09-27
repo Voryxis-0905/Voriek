@@ -1,6 +1,6 @@
-# Contributing to Story Engine
+# Contributing to Voriek
 
-Story Engine is an active MVP. Start with the [README](README.md), [design principles](docs/DESIGN-PRINCIPLES.md), and [codebase map](docs/CODEBASE.md).
+Voriek is an actively developed MVP. Start with the [README](README.md), [design principles](docs/DESIGN-PRINCIPLES.md), and [codebase map](docs/CODEBASE.md).
 
 ## Setup
 

@@ -62,3 +62,37 @@ EXACT JSON STRUCTURE TO RETURN:
   "goal_updates": ["new goal 1"]
 }
 """
+
+
+# Experimental narration keeps the same perception/update calls, but lets the
+# actor retire obsolete intentions using already-confirmed recent scenes.
+EXPERIMENTAL_PSYCHOLOGY_PERCEPTION_PROMPT = PSYCHOLOGY_PERCEPTION_PROMPT.replace(
+    'Write in the same language as the chapter_text provided in the payload.',
+    'The payload may include recent_confirmed_turns containing this character\'s own '
+    'perceptions from earlier saved scenes, not omniscient summaries or proposed future beats. '
+    'Before naming an opportunity or decision, check whether '
+    'the character already saw that action completed there. The final chapter_text remains '
+    'the authority for the present scene. An ordinary wish to finish a job before a radio '
+    'bulletin or meal is not a threat or deadline without an established consequence; do not '
+    'repeat it as pressure every turn.\n\n'
+    'Write in the same language as the chapter_text provided in the payload.',
+    1,
+)
+
+EXPERIMENTAL_PSYCHOLOGY_UPDATE_PROMPT = PSYCHOLOGY_UPDATE_PROMPT.replace(
+    '"mood", "goal_updates".',
+    '"mood", "goal_updates", "goal_removals".',
+    1,
+).replace(
+    '10. Ground each update in the FINAL state of chapter_text.',
+    '9a. "goal_removals": Array of exact strings from current_psychology.goals that are '
+    'already achieved, obsolete, or contradicted by chapter_text or recent_confirmed_turns. '
+    'Do not remove an ongoing goal merely because the character has not acted on it yet. '
+    'Never add a replacement goal to repeat a completed task.\n'
+    '10. Ground each update in the FINAL state of chapter_text.',
+    1,
+).replace(
+    '  "goal_updates": ["new goal 1"]',
+    '  "goal_updates": [],\n  "goal_removals": []',
+    1,
+)

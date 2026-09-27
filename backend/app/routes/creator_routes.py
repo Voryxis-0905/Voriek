@@ -52,7 +52,7 @@ def _ensure_snapshot_compatible(save_dir: str) -> dict:
                 status_code=409,
                 detail=(
                     f"Save snapshot schema_version {version} is newer than this app supports "
-                    f"(max {SCHEMA_VERSION}). Update Story Engine before restoring or branching."
+                    f"(max {SCHEMA_VERSION}). Update Voriek before restoring or branching."
                 ),
             )
     try:

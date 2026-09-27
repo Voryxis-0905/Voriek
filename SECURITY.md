@@ -6,7 +6,7 @@ Security fixes are applied to the current `main` branch. This project is current
 
 ## Local data and API keys
 
-Provider keys configured in the UI are stored in the local Story Engine data directory, normally `data/`. World-specific overrides are stored beside that world's local data. The repository ignores `data/`, `.env`, and related local configuration files.
+Provider keys configured in the UI are stored in Voriek's local data directory, normally `data/`. World-specific overrides are stored beside that world's local data. The repository ignores `data/`, `.env`, and related local configuration files.
 
 You can set `STORY_ENGINE_DATA_DIR` to keep all local worlds, saves, and runtime configuration outside the repository. Do not attach API keys, personal save data, or exported runtime configuration to a public issue.
 

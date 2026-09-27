@@ -135,7 +135,7 @@ class ChapterContinueRequest(BaseModel):
     # the classic planner/writer guidance, so an older client keeps its exact
     # previous behaviour. An unknown value is rejected by validation rather than
     # silently downgraded, so a typo cannot look like "the switch did nothing".
-    narration_mode: Optional[Literal["classic", "experimental"]] = None
+    narration_mode: Optional[Literal["classic", "experimental", "ensemble"]] = None
 
 
 class TimeSkipRequest(BaseModel):
@@ -148,7 +148,7 @@ class TimeSkipRequest(BaseModel):
     request_id: Optional[str] = None
     expected_revision: Optional[int] = None
     # Only read when a time skip generates a turn; the preview ignores it.
-    narration_mode: Optional[Literal["classic", "experimental"]] = None
+    narration_mode: Optional[Literal["classic", "experimental", "ensemble"]] = None
 
 
 class TravelPreviewRequest(BaseModel):
@@ -160,7 +160,7 @@ class ChapterStartRequest(BaseModel):
     opening_text: Optional[str] = None
     # The first playable scene is a generated turn like any other, so it honours
     # the same switch instead of silently falling back to the classic guidance.
-    narration_mode: Optional[Literal["classic", "experimental"]] = None
+    narration_mode: Optional[Literal["classic", "experimental", "ensemble"]] = None
 
 
 class CharacterStateChange(BaseModel):
@@ -280,9 +280,12 @@ class BranchRequest(BaseModel):
 class RegenerateRequest(BaseModel):
     request_id: Optional[str] = None
     expected_revision: Optional[int] = None
+    # When supplied, replay the latest turn from its pre-turn snapshot using
+    # revised player intent. Omission retains the original reroll behavior.
+    user_input: Optional[str] = Field(default=None, min_length=1, max_length=10000)
     # A reroll is a new generation of the latest turn, so it follows the switch
     # too. It never rewrites an earlier chapter.
-    narration_mode: Optional[Literal["classic", "experimental"]] = None
+    narration_mode: Optional[Literal["classic", "experimental", "ensemble"]] = None
 
 
 class ForeshadowingsUpdateReq(BaseModel):

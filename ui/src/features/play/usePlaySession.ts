@@ -160,9 +160,8 @@ export function usePlaySession(worldName: string) {
    */
   const readStoredNarrationMode = useCallback((name: string): NarrationMode => {
     try {
-      return localStorage.getItem(narrationModeStorageKey(name)) === 'experimental'
-        ? 'experimental'
-        : 'classic';
+      const saved = localStorage.getItem(narrationModeStorageKey(name));
+      return saved === 'experimental' || saved === 'ensemble' ? saved : 'classic';
     } catch {
       return 'classic';
     }
@@ -171,8 +170,8 @@ export function usePlaySession(worldName: string) {
   const setNarrationMode = (value: NarrationMode) => {
     setNarrationModeState(value);
     try {
-      if (value === 'experimental') {
-        localStorage.setItem(narrationModeStorageKey(worldName), 'experimental');
+      if (value !== 'classic') {
+        localStorage.setItem(narrationModeStorageKey(worldName), value);
       } else {
         // Off is the absence of a key, so "never touched" and "turned back off"
         // read the same way on the next visit.
@@ -193,9 +192,9 @@ export function usePlaySession(worldName: string) {
    * the time-skip execute call.
    */
   const modeOpts = () =>
-    narrationMode === 'experimental' ? { narrationMode: 'experimental' as const } : {};
+    narrationMode !== 'classic' ? { narrationMode } : {};
   const modeBody = () =>
-    narrationMode === 'experimental' ? { narration_mode: 'experimental' as const } : {};
+    narrationMode !== 'classic' ? { narration_mode: narrationMode } : {};
 
   useEffect(() => {
     // Scroll the transcript column itself, never `scrollIntoView`.
@@ -627,12 +626,18 @@ export function usePlaySession(worldName: string) {
     }
   };
 
-  const handleRegenerate = async () => {
-    if (sendingRef.current) return;
+  const handleRegenerate = async (replacementInput?: string): Promise<boolean> => {
+    if (sendingRef.current) return false;
+    const revisedInput = replacementInput?.trim();
+    if (replacementInput !== undefined && !revisedInput) {
+      setError('Enter a revised action before rerolling.');
+      return false;
+    }
     const token = worldTokenRef.current;
-    const reuse = pendingActionRef.current?.userInput === '__regenerate__';
+    const actionIdentity = revisedInput === undefined ? '__regenerate__' : `__regenerate__:${revisedInput}`;
+    const reuse = pendingActionRef.current?.userInput === actionIdentity;
     const requestId = reuse ? pendingActionRef.current!.id : makeRequestId();
-    pendingActionRef.current = { id: requestId, userInput: '__regenerate__' };
+    pendingActionRef.current = { id: requestId, userInput: actionIdentity };
     sendingRef.current = true;
     setLoading(true);
     setError(null);
@@ -640,17 +645,20 @@ export function usePlaySession(worldName: string) {
       const res = await api.play.regenerate(worldName, {
         requestId,
         expectedRevision: revisionRef.current,
+        userInput: revisedInput,
         ...modeOpts(),
       });
-      if (token !== worldTokenRef.current) return;
+      if (token !== worldTokenRef.current) return false;
       if (typeof res?.revision === 'number') {
         revisionRef.current = res.revision;
       }
       pendingActionRef.current = null;
       await Promise.all([loadExistingChapters(), reloadCommittedData()]);
+      return true;
     } catch (e: any) {
-      if (token !== worldTokenRef.current) return;
+      if (token !== worldTokenRef.current) return false;
       setError(e.message || 'Failed to regenerate chapter');
+      return false;
     } finally {
       // Only the request that still owns the active world may release the lock;
       // a late response from a previous world must not unlock the new one.

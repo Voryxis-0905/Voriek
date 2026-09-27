@@ -1,6 +1,8 @@
-# Story Engine
+# Voriek
 
-Story Engine is a local interactive storytelling application with a Python/FastAPI backend and a React/TypeScript interface.
+Voriek is a local interactive storytelling application by Voryxis, built with a Python/FastAPI backend and a React/TypeScript interface.
+
+![Voriek interactive storytelling interface](docs/assets/voriek-preview.png)
 
 Players choose actions that shape outcomes. Each world retains its own history, rules, characters, memories, map, calendar, quests, and consequences. A creator can also play the world while using dedicated tools to inspect and edit its state.
 
@@ -22,7 +24,7 @@ python -m venv .venv
 npm --prefix ui ci
 ```
 
-On Windows, run `Start-StoryEngine.cmd`, then open http://localhost:5173. The backend runs at http://127.0.0.1:8000. Press Ctrl+C in the running window to stop it.
+On Windows, run `Start-Voriek.cmd`, then open http://localhost:5173. The backend runs at http://127.0.0.1:8000. Press Ctrl+C in the running window to stop it.
 
 On other operating systems, activate the Python environment and run `npm run dev`.
 
@@ -54,4 +56,4 @@ Read the [documentation index](docs/README.md) and [contribution guide](CONTRIBU
 
 ## License
 
-Story Engine is licensed under the [MIT License](LICENSE).
+Voriek is licensed under the [MIT License](LICENSE).

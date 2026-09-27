@@ -586,6 +586,21 @@ describe('usePlaySession experimental narration mode', () => {
     expect(result.current.turns).toHaveLength(1);
   });
 
+  it('sends and remembers the opt-in actor ensemble independently of classic', async () => {
+    const first = render('WorldA');
+    await waitFor(() => expect(first.result.current.playState).not.toBeNull());
+    act(() => first.result.current.setNarrationMode('ensemble'));
+    await sendOne(first.result);
+    expect(api.play.continue).toHaveBeenCalledWith(
+      'WorldA', 'look around', expect.objectContaining({ narrationMode: 'ensemble' }),
+    );
+    first.unmount();
+
+    const again = render('WorldA');
+    await waitFor(() => expect(again.result.current.playState).not.toBeNull());
+    expect(again.result.current.narrationMode).toBe('ensemble');
+  });
+
   it('carries the mode into chapter start, time skip and reroll', async () => {
     const { result } = render();
     await waitFor(() => expect(api.play.state).toHaveBeenCalled());
@@ -605,6 +620,21 @@ describe('usePlaySession experimental narration mode', () => {
     await act(async () => { await result.current.handleRegenerate(); });
     expect(api.play.regenerate).toHaveBeenCalledWith(
       'WorldA', expect.objectContaining({ narrationMode: 'experimental' }),
+    );
+  });
+
+  it('rerolls the latest turn with a revised action and reports success', async () => {
+    const { result } = render();
+    await waitFor(() => expect(api.play.state).toHaveBeenCalled());
+
+    let replaced = false;
+    await act(async () => {
+      replaced = await result.current.handleRegenerate('Invite Ren to lunch after class.');
+    });
+
+    expect(replaced).toBe(true);
+    expect(api.play.regenerate).toHaveBeenCalledWith(
+      'WorldA', expect.objectContaining({ userInput: 'Invite Ren to lunch after class.' }),
     );
   });
 

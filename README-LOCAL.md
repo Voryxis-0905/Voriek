@@ -1,10 +1,10 @@
-# Story Engine local setup notes
+# Voriek local setup notes
 
 This file records local-machine setup notes from the initial import on 17 September 2026. It is not the current project specification; use [README.md](README.md) for installation and validation.
 
 ## Run locally
 
-- Open `Start-StoryEngine.cmd` and keep that window running, then visit http://localhost:5173.
+- Open `Start-Voriek.cmd` and keep that window running, then visit http://localhost:5173.
 - Press Ctrl+C in the running window to stop the backend and UI.
 - Do not start another development session when the application is already listening on ports 8000 and 5173.
 - Dependencies live in `.venv`, based on the machine's Python 3.12 runtime. Recreate `.venv` when moving to another machine.

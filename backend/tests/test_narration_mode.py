@@ -35,6 +35,7 @@ from app.prompts import WRITER_SYSTEM_PROMPT
 from app.routes import world_routes
 from app.story.narration_mode import normalize_narration_mode
 from app.story.consistency import build_consistency_checker_payload
+from app.prompts import ENSEMBLE_CONSISTENCY_CHECKER_SYSTEM_PROMPT
 
 
 def changed_blocks(old: str, new: str):
@@ -58,15 +59,17 @@ class NarrationPromptContract(unittest.TestCase):
 
     def test_only_the_named_guidance_sections_change(self):
         planner_blocks = changed_blocks(PLANNER_SYSTEM_PROMPT, EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
-        self.assertEqual(len(planner_blocks), 5, planner_blocks)
+        self.assertEqual(len(planner_blocks), 6, planner_blocks)
         self.assertTrue(
             planner_blocks[0][0][0].startswith('# PACING DISCIPLINE'),
             f'planner diff starts somewhere unexpected: {planner_blocks[0][0][0]!r}',
         )
         self.assertTrue(planner_blocks[1][0][0].lstrip().startswith('- tier_4_thread_ledger'), planner_blocks)
-        self.assertTrue(planner_blocks[2][0][0].startswith('6. "anchor_keywords"'), planner_blocks)
-        self.assertTrue(planner_blocks[3][0][0].lstrip().startswith('"boundary_check"'), planner_blocks)
-        self.assertTrue(planner_blocks[4][0][0].lstrip().startswith('"anchor_keywords"'), planner_blocks)
+        self.assertTrue(planner_blocks[2][0][0].startswith('2. The JSON must have'), planner_blocks)
+        self.assertTrue(planner_blocks[3][0][0].startswith('4. "scene_outline"'), planner_blocks)
+        self.assertEqual(planner_blocks[4][0], [], planner_blocks)
+        self.assertTrue(planner_blocks[4][1][0].startswith('8a. Treat state_changes'), planner_blocks)
+        self.assertTrue(planner_blocks[5][0][0].lstrip().startswith('"boundary_check"'), planner_blocks)
 
         writer_blocks = changed_blocks(WRITER_SYSTEM_PROMPT, EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
         starts = [block[0][0] if block[0] else '' for block in writer_blocks]
@@ -123,12 +126,22 @@ class NarrationPromptContract(unittest.TestCase):
         self.assertIn('"ongoing" means no deadline', EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
         self.assertIn('without bringing it back as a final-line reminder', EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
         self.assertNotIn('advance or resolve them within deadlines', EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
+        self.assertIn('playable motives, not guaranteed actions', EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
+        self.assertIn('Never promote a guess', EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
+        self.assertIn('state_changes as a provisional estimate', EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
 
         # The writer no longer treats the word target as a quota, and no longer
         # treats the style card as a template every scene must copy.
         self.assertIn('target roughly `words_per_turn_target` words', WRITER_SYSTEM_PROMPT)
         self.assertNotIn('target roughly `words_per_turn_target` words', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
         self.assertIn('Let the scene decide the length', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
+        self.assertIn('a chapter is a connected dramatic unit', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
+        self.assertIn('A small time skip', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
+        self.assertIn('Do not infer that lunch or another event has happened', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
+        self.assertIn('Do not repeat or paraphrase the same image', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
+        self.assertIn('A meaningful transformed callback is welcome', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
+        self.assertNotIn('a chapter is a connected dramatic unit', WRITER_SYSTEM_PROMPT)
+        self.assertNotIn('Do not repeat or paraphrase the same image', WRITER_SYSTEM_PROMPT)
         self.assertIn('not a template every scene must copy', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
         self.assertIn('an ordinary conversation, small errand or quiet observation is enough',
                       EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
@@ -136,6 +149,7 @@ class NarrationPromptContract(unittest.TestCase):
         self.assertIn('"ongoing" means there is no deadline', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
         self.assertIn('Do not end a quiet turn by recapping an unchanged offer', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
         self.assertNotIn('Advance or resolve threads and hints naturally', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
+        self.assertIn('The planner is a director, not a source of new canon', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
 
     def test_absent_or_unusable_values_resolve_to_the_classic_profile(self):
         for value in (None, '', '   ', 'classic', 'CLASSIC', 'bogus', 5, {}, []):
@@ -170,6 +184,7 @@ class NarrationModeRequestTests(unittest.TestCase):
         self.calls = []
         self.planner_anchors = []
         self.writer_suggestions = None
+        self.planner_direction = None
         self.enterContext(patch.object(main, 'call_llm', side_effect=self.fake_llm))
 
     def seed(self, name):
@@ -184,11 +199,17 @@ class NarrationModeRequestTests(unittest.TestCase):
     def fake_llm(self, system_prompt, user_prompt, user_input_for_mock='',
                  mock_response=None, world_name=None, role=None):
         self.calls.append({'role': role, 'system_prompt': system_prompt, 'user_prompt': user_prompt})
-        if system_prompt in (PLANNER_SYSTEM_PROMPT, EXPERIMENTAL_PLANNER_SYSTEM_PROMPT):
+        if role == 'planner':
             response = json.loads(main.mock_planner_response(user_input_for_mock))
             response['anchor_keywords'] = self.planner_anchors
+            response['actor_observation'] = 'Xue Li asks about the courtyard.'
+            if self.planner_direction is not None:
+                response['scene_direction'] = self.planner_direction
             return json.dumps(response, ensure_ascii=False)
-        if system_prompt in (WRITER_SYSTEM_PROMPT, EXPERIMENTAL_WRITER_SYSTEM_PROMPT):
+        if role == 'actor':
+            return json.dumps({'visible_behavior': 'Gu Changge waits.',
+                               'possible_dialogue': 'What did you notice?'})
+        if role == 'writer':
             response = json.loads(main.mock_narrator_response(user_input_for_mock))
             if self.writer_suggestions is not None:
                 response['suggested_actions'] = self.writer_suggestions
@@ -239,6 +260,92 @@ class NarrationModeRequestTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn(EXPERIMENTAL_PLANNER_SYSTEM_PROMPT, self.systems())
         self.assertIn(EXPERIMENTAL_WRITER_SYSTEM_PROMPT, self.systems())
+
+    def test_ensemble_calls_present_npc_and_keeps_its_cue_in_writer_payload(self):
+        response = self.post('chapter/continue', {
+            'user_input': 'Ask Gu Changge what he noticed.', 'narration_mode': 'ensemble',
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        actor_calls = [call for call in self.calls if call['role'] == 'actor']
+        self.assertEqual(len(actor_calls), 1)
+        actor_payload = json.loads(actor_calls[0]['user_prompt'])
+        self.assertEqual(actor_payload['character_id'], 'char_gu_changge')
+        self.assertNotIn('secrets', actor_payload['other_people_present']['char_xueli'])
+        writer_payload = json.loads(next(
+            call['user_prompt'] for call in self.calls if call['role'] == 'writer'))
+        self.assertEqual(writer_payload['actor_cues']['char_gu_changge']['possible_dialogue'],
+                         'What did you notice?')
+        self.assertNotIn('relationship_context', writer_payload)
+        self.assertEqual(len(self.read('chapters.json')['chapters']), 1)
+
+    def test_ensemble_checker_gets_prior_prose_and_all_eligible_start_locations(self):
+        first = self.post('chapter/continue', {
+            'user_input': 'Wait with Gu Changge.', 'narration_mode': 'ensemble',
+        })
+        self.assertEqual(first.status_code, 200, first.text)
+        prior_text = self.read('chapters.json')['chapters'][-1]['chapter_text']
+        self.reset_calls()
+
+        second = self.post('chapter/continue', {
+            'user_input': 'Ask what happened.', 'narration_mode': 'ensemble',
+        })
+        self.assertEqual(second.status_code, 200, second.text)
+        checker_calls = [call for call in self.calls if call['role'] == 'checker']
+        self.assertEqual(len(checker_calls), 1)
+        self.assertEqual(checker_calls[0]['system_prompt'],
+                         ENSEMBLE_CONSISTENCY_CHECKER_SYSTEM_PROMPT)
+        payload = json.loads(checker_calls[0]['user_prompt'])
+        self.assertEqual(payload['recent_confirmed_scenes'][-1]['chapter_text'], prior_text)
+        self.assertIn('char_gu_changge', payload['character_locations_before_chapter'])
+        self.assertIn('char_xueli', payload['character_locations_before_chapter'])
+        writer = next(call for call in self.calls if call['role'] == 'writer')
+        self.assertNotIn('recent_confirmed_scenes', json.loads(writer['user_prompt']))
+
+    def test_ensemble_checker_retry_keeps_same_confirmed_evidence(self):
+        first = self.post('chapter/continue', {
+            'user_input': 'Observe Gu Changge.', 'narration_mode': 'ensemble',
+        })
+        self.assertEqual(first.status_code, 200, first.text)
+        self.reset_calls()
+        checks = 0
+
+        def fail_then_pass(system_prompt, user_prompt, **kwargs):
+            nonlocal checks
+            if kwargs.get('role') == 'checker':
+                self.calls.append({'role': 'checker', 'system_prompt': system_prompt,
+                                   'user_prompt': user_prompt})
+                checks += 1
+                if checks == 1:
+                    return json.dumps({'consistent': False, 'severity': 'major',
+                                       'issues': ['Earlier scene says the door is closed; draft says open.'],
+                                       'explanation': 'Direct contradiction.'})
+            return self.fake_llm(system_prompt, user_prompt, **kwargs)
+
+        with patch.object(main, 'call_llm', side_effect=fail_then_pass):
+            response = self.post('chapter/continue', {
+                'user_input': 'Look at the door.', 'narration_mode': 'ensemble',
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(checks, 2)
+        checker_payloads = [json.loads(call['user_prompt']) for call in self.calls
+                            if call['role'] == 'checker']
+        self.assertEqual(checker_payloads[0]['recent_confirmed_scenes'],
+                         checker_payloads[1]['recent_confirmed_scenes'])
+        self.assertTrue(response.json()['chapter']['consistency_check']['triggered_rewrite'])
+
+    def test_failed_actor_stage_does_not_commit_a_partial_turn(self):
+        def invalid_actor(system_prompt, user_prompt, **kwargs):
+            if kwargs.get('role') == 'actor':
+                return 'not valid JSON'
+            return self.fake_llm(system_prompt, user_prompt, **kwargs)
+
+        with patch.object(main, 'call_llm', side_effect=invalid_actor):
+            response = self.post('chapter/continue', {
+                'user_input': 'Ask Gu Changge about the courtyard.',
+                'narration_mode': 'ensemble',
+            })
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(self.read('chapters.json')['chapters'], [])
         self.assertNotIn(PLANNER_SYSTEM_PROMPT, self.systems())
         self.assertNotIn(WRITER_SYSTEM_PROMPT, self.systems())
 
@@ -256,6 +363,33 @@ class NarrationModeRequestTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()['suggested_actions'], [])
+
+    def test_director_cues_reach_only_experimental_writer_without_extra_calls(self):
+        self.planner_direction = {
+            'focus': 'The small meal at the table',
+            'stop_before': 'Jun chooses whether to answer the phone',
+            'actors': {
+                'char_gu_changge': {'want': 'Finish breakfast', 'approach': 'Answer briefly'},
+                'char_xueli': {'want': 'Answer for the player', 'approach': 'Take control'},
+                'not_present': {'want': 'Reveal a secret', 'approach': 'Arrive suddenly'},
+            },
+        }
+        response = self.post('chapter/continue', {
+            'user_input': 'Sit and eat.', 'narration_mode': 'experimental',
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        writer_payloads = self.payloads_for(EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
+        self.assertEqual(len(writer_payloads), 1)
+        self.assertEqual(writer_payloads[0]['scene_direction']['focus'],
+                         'The small meal at the table')
+        self.assertEqual(list(writer_payloads[0]['scene_direction']['actors']), ['char_gu_changge'])
+        self.assertEqual([call['role'] for call in self.calls].count('planner'), 1)
+        self.assertEqual([call['role'] for call in self.calls].count('writer'), 1)
+
+        self.reset_calls()
+        response = self.post('chapter/continue', {'user_input': 'Wait.', 'narration_mode': 'classic'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotIn('scene_direction', self.payloads_for(WRITER_SYSTEM_PROMPT)[0])
 
     def test_checker_receives_a_human_readable_clock_window(self):
         payload = build_consistency_checker_payload(
@@ -401,6 +535,28 @@ class NarrationModeRequestTests(unittest.TestCase):
         self.assertIn(EXPERIMENTAL_WRITER_SYSTEM_PROMPT, self.systems())
         self.assertEqual(len(self.read('chapters.json')['chapters']), 1,
                          'a reroll replaces the latest turn rather than adding one')
+
+    def test_regenerate_can_replace_the_latest_action_and_rejects_blank_edits(self):
+        first = self.post('chapter/continue', {'user_input': 'Wait by the door.'})
+        self.assertEqual(first.status_code, 200, first.text)
+        before = self.read('chapters.json')['chapters']
+        revision_before = self.read('world_config.json')['revision']
+
+        blank = self.post('chapter/regenerate', {'user_input': '   '})
+        self.assertEqual(blank.status_code, 422, blank.text)
+        self.assertEqual(self.read('chapters.json')['chapters'], before)
+        self.assertEqual(self.read('world_config.json')['revision'], revision_before)
+
+        revised_input = 'Ask Nao to come with Tarou to lunch after class.'
+        response = self.post('chapter/regenerate', {'user_input': revised_input})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        saved_turns = self.read('chapters.json')['chapters']
+        self.assertEqual(len(saved_turns), 1, 'the reroll replaces, rather than appends to, the latest turn')
+        self.assertEqual(saved_turns[-1]['user_input'], revised_input)
+        planner_payloads = self.payloads_for(PLANNER_SYSTEM_PROMPT)
+        self.assertTrue(planner_payloads)
+        self.assertEqual(planner_payloads[-1]['user_input'], revised_input)
 
     # -- non-destructive guarantees --------------------------------------
     def test_the_switch_never_rewrites_an_already_saved_turn(self):

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PlayNarrative } from './PlayNarrative';
 
 function props(turns: any[]) {
@@ -80,6 +80,27 @@ describe('PlayNarrative story rendering', () => {
     expect(container.querySelector('script')).toBeNull();
     expect((window as any).__pwned).toBe(false);
     expect(container.textContent).toContain('<img src=x onerror="window.__pwned=true">');
+  });
+
+  it('lets the player revise the latest action before rerolling it', async () => {
+    const handleRegenerate = vi.fn().mockResolvedValue(true);
+    render(<PlayNarrative {...props([{
+      input: 'Wait by the door.',
+      output: 'The hall is quiet.',
+      chapterIndex: 1,
+      turnIndex: 1,
+      checkpointId: 'cp_0',
+      timestamp: Date.now(),
+    }])} handleRegenerate={handleRegenerate} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit latest action and reroll' }));
+    const editor = screen.getByRole('textbox', { name: 'Revised latest action' });
+    expect(editor).toHaveValue('Wait by the door.');
+    fireEvent.change(editor, { target: { value: 'Ask Nao to join Tarou for lunch.' } });
+    expect(screen.getByText(/Only the latest turn is replaced/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reroll with revised action' }));
+
+    await waitFor(() => expect(handleRegenerate).toHaveBeenCalledWith('Ask Nao to join Tarou for lunch.'));
   });
 
   it('shows a not-saved draft with its text and a retry path', () => {

@@ -8,6 +8,13 @@ type Props = Pick<PlaySession, 'playState' | 'turns' | 'input' | 'setInput' | 'l
 export function PlayNarrative({ playState, turns, input, setInput, loading, error, setError, outputLength, setOutputLength, narrationMode, setNarrationMode, expandedTurns, toggleTurnExpanded, collapseAllPrevious, expandAllTurns, preludeText, draft, handleDismissDraft, handleRetryDraft, epilogue, lifecycleStatus, epilogueChoices, handleLoadEndgameChoices, handleChooseEnding, chatEndRef, handleSend, timeSkipOpen, setTimeSkipOpen, timeSkipPreview, timeSkipLoading, handlePreviewTimeSkip, handleExecuteTimeSkip, handleStartChapter, handleRegenerate, handleGeneratePrelude, handleConfirmPrelude }: Props) {
   const [skip, setSkip] = useState<TimeSkipRequest>({ amount: 1, unit: 'hours', activity: '', interruption_policy: 'important_events', narration_detail: 'standard', force: false });
   const [previewedSkip, setPreviewedSkip] = useState('');
+  const [editingLatestAction, setEditingLatestAction] = useState(false);
+  const [editedLatestAction, setEditedLatestAction] = useState('');
+  const latestTurn = turns[turns.length - 1];
+  useEffect(() => {
+    setEditingLatestAction(false);
+    setEditedLatestAction(latestTurn?.input || '');
+  }, [turns.length, latestTurn?.chapterIndex, latestTurn?.turnIndex, latestTurn?.input]);
   useEffect(() => { if (!timeSkipOpen) { setSkip(s => ({ ...s, force: false })); setPreviewedSkip(''); } }, [timeSkipOpen]);
   return (<>
       {/* CENTER NARRATIVE MAIN VIEW.
@@ -65,16 +72,31 @@ export function PlayNarrative({ playState, turns, input, setInput, loading, erro
             >
               <input
                 type="checkbox"
-                checked={narrationMode === 'experimental'}
+                checked={narrationMode !== 'classic'}
                 onChange={(e) => setNarrationMode(e.target.checked ? 'experimental' : 'classic')}
                 aria-label="Experimental pacing"
                 className="w-3.5 h-3.5 cursor-pointer accent-[var(--periwinkle-dark)]"
               />
-              <span className={narrationMode === 'experimental' ? 'text-[var(--periwinkle-dark)]' : undefined}>
+              <span className={narrationMode !== 'classic' ? 'text-[var(--periwinkle-dark)]' : undefined}>
                 Experimental pacing
               </span>
             </label>
-            {narrationMode === 'experimental' && (
+            {narrationMode !== 'classic' && (
+              <label
+                className="flex items-center gap-1.5 cursor-pointer select-none"
+                title="Actor ensemble is experimental: one extra model call per present NPC, so turns may cost more and take longer. NPCs receive only their own knowledge and observable scene cues. Turns still save normally."
+              >
+                <input
+                  type="checkbox"
+                  checked={narrationMode === 'ensemble'}
+                  onChange={(e) => setNarrationMode(e.target.checked ? 'ensemble' : 'experimental')}
+                  aria-label="Actor ensemble"
+                  className="w-3.5 h-3.5 cursor-pointer accent-[var(--periwinkle-dark)]"
+                />
+                <span>Actor ensemble (slower)</span>
+              </label>
+            )}
+            {narrationMode !== 'classic' && (
               <span className="text-[10px] font-medium text-[var(--ink-faint)] whitespace-nowrap">
                 turns still save normally
               </span>
@@ -207,10 +229,70 @@ export function PlayNarrative({ playState, turns, input, setInput, loading, erro
                 {/* User Action Prompt */}
                 {turn.input && turn.input !== 'Start Chapter' && (
                   <div className="flex justify-end">
-                    <div className="px-5 py-3 rounded-3xl rounded-tr-sm bg-gradient-to-r from-[var(--periwinkle)] to-[var(--periwinkle-dark)] text-white text-[15px] font-medium max-w-lg shadow-[var(--shadow-sm)] leading-snug">
-                      <span className="text-white opacity-70 font-mono mr-1.5">▶</span>
-                      {turn.input}
-                    </div>
+                    {isLatest && editingLatestAction ? (
+                      <div className="w-full max-w-2xl rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4 shadow-[var(--shadow-sm)]">
+                        <label htmlFor="revised-latest-action" className="mb-2 block text-xs font-bold text-[var(--ink-soft)]">
+                          Revise this action, then reroll
+                        </label>
+                        <textarea
+                          id="revised-latest-action"
+                          aria-label="Revised latest action"
+                          value={editedLatestAction}
+                          onChange={(event) => setEditedLatestAction(event.target.value)}
+                          disabled={loading}
+                          rows={3}
+                          className="w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--bg-subtle)] p-3 text-sm text-[var(--ink-main)] focus:border-[var(--periwinkle-dark)] focus:outline-none disabled:opacity-60"
+                        />
+                        <p className="mt-2 text-xs leading-relaxed text-[var(--ink-soft)]">
+                          Only the latest turn is replaced. Earlier turns stay; if generation fails, this saved version is kept.
+                        </p>
+                        <div className="mt-3 flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingLatestAction(false)}
+                            disabled={loading}
+                            className="pill-btn px-3 py-1.5 text-xs disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const replaced = await handleRegenerate(editedLatestAction.trim());
+                              if (replaced) setEditingLatestAction(false);
+                            }}
+                            disabled={loading || !editedLatestAction.trim() || editedLatestAction.trim() === turn.input.trim()}
+                            className="pill-btn pill-btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+                          >
+                            <span className="inline-flex items-center gap-1.5">
+                              <ArrowPathIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+                              Reroll with revised action
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex max-w-2xl items-start gap-3 rounded-3xl rounded-tr-sm bg-gradient-to-r from-[var(--periwinkle)] to-[var(--periwinkle-dark)] px-5 py-3 text-[15px] font-medium leading-snug text-white shadow-[var(--shadow-sm)]">
+                        <span className="min-w-0 flex-1">
+                          <span className="mr-1.5 font-mono opacity-70">▶</span>
+                          {turn.input}
+                        </span>
+                        {isLatest && (
+                          <button
+                            type="button"
+                            aria-label="Edit latest action and reroll"
+                            onClick={() => {
+                              setEditedLatestAction(turn.input);
+                              setEditingLatestAction(true);
+                            }}
+                            disabled={loading}
+                            className="shrink-0 rounded-lg border border-white/30 px-2 py-1 text-xs font-semibold hover:bg-white/10 disabled:opacity-50"
+                          >
+                            Edit & reroll
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -268,9 +350,9 @@ export function PlayNarrative({ playState, turns, input, setInput, loading, erro
                     {/* Turn Card Footer & Contextual Reroll Button */}
                     <div className="flex items-center justify-between pt-4 border-t border-[var(--line-2)] text-xs text-[var(--ink-soft)] font-mono">
                       <span>{turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
-                      {isLatest && (
+                      {isLatest && !editingLatestAction && (
                         <button
-                          onClick={handleRegenerate}
+                          onClick={() => void handleRegenerate()}
                           disabled={loading}
                           className="pill-btn px-3 py-1.5 text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50 hover:border-[var(--periwinkle-dark)] transition-colors"
                           title="Reroll/Regenerate this latest turn"

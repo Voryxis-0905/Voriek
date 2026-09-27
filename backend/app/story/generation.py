@@ -28,6 +28,35 @@ def check_anchor_keywords(chapter_text: str, anchor_keywords: List[str]) -> List
     return missing
 
 
+def _scene_direction_for_writer(raw: object, character_state: object,
+                                protagonist_id: object = None) -> dict:
+    """Keep director notes advisory and limited to characters in this scene."""
+    if not isinstance(raw, dict):
+        return {}
+    direction = {}
+    for field in ("focus", "stop_before"):
+        value = raw.get(field)
+        if isinstance(value, str) and value.strip():
+            direction[field] = value.strip()[:400]
+    actors = raw.get("actors")
+    allowed = character_state if isinstance(character_state, dict) else {}
+    if isinstance(actors, dict):
+        clean_actors = {}
+        for actor_id, cue in actors.items():
+            if actor_id not in allowed or actor_id == protagonist_id or not isinstance(cue, dict):
+                continue
+            clean_cue = {}
+            for field in ("want", "approach"):
+                value = cue.get(field)
+                if isinstance(value, str) and value.strip():
+                    clean_cue[field] = value.strip()[:240]
+            if clean_cue:
+                clean_actors[actor_id] = clean_cue
+        if clean_actors:
+            direction["actors"] = clean_actors
+    return direction
+
+
 def call_planner_stage(payload: dict, user_input_for_mock: str, world_name: str = None,
                        narration_mode=None) -> dict:
     try:
@@ -104,6 +133,12 @@ def call_planner_stage(payload: dict, user_input_for_mock: str, world_name: str 
         "is_ooc": is_ooc,
         "action_translation": action_translation,
         "effective_user_input": effective_user_input,
+        "scene_direction": (_scene_direction_for_writer(
+            planner_parsed.get("scene_direction"), payload.get("character_state"),
+            (payload.get("world_config") or {}).get("protagonist_id")
+        ) if is_experimental(narration_mode) else {}),
+        "actor_observation": (planner_parsed.get("actor_observation", "")[:600]
+                              if isinstance(planner_parsed.get("actor_observation"), str) else ""),
     }
 
 
@@ -113,7 +148,7 @@ def call_writer_stage(payload: dict, scene_outline: str, facts_this_turn: list,
                       is_ooc: bool, action_translation: str,
                       effective_user_input: str,
                       world_name: str = None, editor_enabled: bool = False,
-                      narration_mode=None):
+                      narration_mode=None, scene_direction=None):
     writer_payload = dict(payload)
     writer_payload["scene_outline"] = scene_outline
     writer_payload["facts_this_turn"] = facts_this_turn
@@ -123,6 +158,8 @@ def call_writer_stage(payload: dict, scene_outline: str, facts_this_turn: list,
         # profile, rare essential anchors are actually visible to the writer
         # instead of only being checked after generation.
         writer_payload["anchor_keywords"] = anchor_keywords
+        if scene_direction:
+            writer_payload["scene_direction"] = scene_direction
 
     # Resolved once and reused by every writer call below (first draft, format
     # retry, keyword retry). A retry that quietly reverted to the classic prompt
@@ -287,5 +324,6 @@ def call_narrator_and_parse(payload: dict, user_input_for_mock: str, world_name:
         planner_out["is_ooc"], planner_out["action_translation"],
         planner_out["effective_user_input"],
         world_name=world_name, editor_enabled=editor_enabled,
-        narration_mode=narration_mode
+        narration_mode=narration_mode,
+        scene_direction=planner_out["scene_direction"],
     )

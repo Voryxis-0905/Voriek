@@ -243,6 +243,10 @@ def chapter_regenerate(world_name: str, req: RegenerateRequest = None):
         )
 
     original_input = turns[-1].get("user_input", "")
+    replacement_input = req.user_input if req and req.user_input is not None else original_input
+    if not replacement_input.strip():
+        raise HTTPException(status_code=422, detail="The revised action cannot be empty")
+    replacement_input = replacement_input.strip()
     request_id = req.request_id if req else None
     expected_revision = req.expected_revision if req else None
 
@@ -251,8 +255,8 @@ def chapter_regenerate(world_name: str, req: RegenerateRequest = None):
     # turn intact).
     return _generate_chapter(
         world_name,
-        narrator_input=original_input,
-        display_input=original_input,
+        narrator_input=replacement_input,
+        display_input=replacement_input,
         request_id=request_id,
         expected_revision=expected_revision,
         regenerate=True,

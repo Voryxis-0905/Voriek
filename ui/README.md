@@ -1,6 +1,6 @@
-# Story Engine UI
+# Voriek UI
 
-The Story Engine interface is built with React, TypeScript, and Vite.
+The Voriek interface is built with React, TypeScript, and Vite.
 
 From the repository root:
 

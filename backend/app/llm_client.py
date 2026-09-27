@@ -160,7 +160,7 @@ def mock_planner_response(user_input: str) -> str:
     return json.dumps(mock, ensure_ascii=False)
 
 
-_VALID_ROLES = frozenset({"planner", "writer", "extractor", "editor", "checker", "summarizer"})
+_VALID_ROLES = frozenset({"planner", "actor", "writer", "extractor", "editor", "checker", "summarizer"})
 
 
 def _is_openclaw_target(provider: str, base_url: str) -> bool:
@@ -216,8 +216,8 @@ def call_llm(system_prompt: str, user_prompt: str, user_input_for_mock: str = ""
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
             if provider == "openrouter":
-                headers["HTTP-Referer"] = "https://story-engine.app"
-                headers["X-Title"] = "Story Engine"
+                headers["HTTP-Referer"] = "https://github.com/Voryxis-0905/Voriek"
+                headers["X-Title"] = "Voriek"
             if _is_openclaw_target(provider, base_url):
                 headers["x-openclaw-scopes"] = "operator.write"
                 if model == "deepseek-web" or "/" not in model:
@@ -328,8 +328,8 @@ def test_llm_connection(world_name: str = None, node_index: int = 0) -> dict:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         if provider == "openrouter":
-            headers["HTTP-Referer"] = "https://story-engine.app"
-            headers["X-Title"] = "Story Engine"
+            headers["HTTP-Referer"] = "https://github.com/Voryxis-0905/Voriek"
+            headers["X-Title"] = "Voriek"
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": "hi"}],

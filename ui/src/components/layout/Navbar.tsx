@@ -63,7 +63,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentWorld, onWorldChange }) =
           </div>
           <div className="flex flex-col">
             <span className="font-[var(--font-display)] font-bold text-xl text-[var(--ink-main)] tracking-tight group-hover:text-[var(--periwinkle-dark)] transition-colors">
-              Story Engine
+              Voriek
             </span>
             <span className="text-[10.5px] tracking-[0.07em] text-[var(--ink-soft)] uppercase font-semibold">
               Interactive storytelling · local
@@ -122,9 +122,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentWorld, onWorldChange }) =
 
         {/* GitHub Link */}
         <a
-          href="https://github.com"
+          href="https://github.com/Voryxis-0905/Voriek"
           target="_blank"
           rel="noreferrer"
+          aria-label="Voriek on GitHub"
+          title="Voriek on GitHub"
           className="text-[var(--ink-soft)] hover:text-[var(--ink-main)] transition-colors"
         >
           <CodeBracketIcon className="w-5 h-5" />

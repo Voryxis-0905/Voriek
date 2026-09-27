@@ -1388,6 +1388,7 @@ class ReliabilityTests(unittest.TestCase):
         with patch.object(main, 'call_llm', side_effect=self._checker_fake(checker)):
             regen = self.post('chapter/regenerate', {
                 'request_id': 'u01-keep-regen', 'expected_revision': before_revision,
+                'user_input': 'Use a different action, but keep this failed attempt uncommitted.',
             })
         self.assertEqual(regen.status_code, 503, regen.text)
         self.assertEqual(self.read('chapters.json')['chapters'], before_turns)

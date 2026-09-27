@@ -146,7 +146,7 @@ def import_world(req: ImportWorldRequest):
             status_code=400,
             detail=(
                 f"Import package schema_version {declared_version} is newer than this app supports "
-                f"(max {SCHEMA_VERSION}). Update Story Engine before importing."
+                f"(max {SCHEMA_VERSION}). Update Voriek before importing."
             ),
         )
 

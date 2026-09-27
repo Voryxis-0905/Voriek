@@ -24,7 +24,7 @@ Describe the expected behavior.
 - OS:
 - Python version:
 - Node.js version:
-- Story Engine commit or release:
+- Voriek commit or release:
 - Model/provider, if relevant:
 
 ## Additional context

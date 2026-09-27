@@ -1,4 +1,4 @@
-# Story Engine design principles
+# Voriek design principles
 
 ## Player agency
 
