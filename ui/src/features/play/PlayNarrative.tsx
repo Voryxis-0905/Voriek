@@ -434,7 +434,7 @@ export function PlayNarrative({ playState, turns, input, setInput, loading, erro
             </div>
           )}
           <div className="max-w-4xl mx-auto flex items-center gap-3">
-            <button onClick={() => setTimeSkipOpen(!timeSkipOpen)} disabled={loading} className="pill-btn pill-btn-secondary p-3.5 rounded-2xl" title="Advance time"><ClockIcon className="w-5 h-5" /></button>
+            <button onClick={() => setTimeSkipOpen(!timeSkipOpen)} disabled={loading} className="pill-btn pill-btn-secondary p-3.5 rounded-2xl shrink-0" title="Advance time"><ClockIcon className="w-5 h-5" /></button>
             <input
               type="text"
               value={input}
@@ -442,12 +442,12 @@ export function PlayNarrative({ playState, turns, input, setInput, loading, erro
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
               placeholder="What do you do? (e.g., Step forward and inspect the glowing dragon altar...)"
               disabled={loading}
-              className="flex-1 px-5 py-3.5 rounded-2xl bg-[var(--bg-surface)] border-2 border-[var(--line)] text-[var(--ink-main)] font-medium text-[15px] focus:outline-none focus:border-[var(--accent-sage)] transition-colors shadow-inner placeholder:text-[var(--ink-faint)] focus:bg-[var(--bg-subtle)] disabled:opacity-50"
+              className="flex-1 min-w-0 px-5 py-3.5 rounded-2xl bg-[var(--bg-surface)] border-2 border-[var(--line)] text-[var(--ink-main)] font-medium text-[15px] focus:outline-none focus:border-[var(--accent-sage)] transition-colors shadow-inner placeholder:text-[var(--ink-faint)] focus:bg-[var(--bg-subtle)] disabled:opacity-50"
             />
             <button
               onClick={handleSend}
               disabled={loading || !input.trim()}
-              className="pill-btn pill-btn-primary px-6 py-3.5 rounded-2xl text-[15px] flex items-center gap-2 shadow-[var(--shadow-sm)] disabled:opacity-50"
+              className="pill-btn pill-btn-primary px-6 py-3.5 rounded-2xl text-[15px] flex items-center gap-2 shadow-[var(--shadow-sm)] disabled:opacity-50 shrink-0"
             >
               <span>{loading ? 'Thinking...' : 'Send'}</span>
               <PaperAirplaneIcon className="w-5 h-5" />
