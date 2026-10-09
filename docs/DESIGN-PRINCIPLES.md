@@ -33,3 +33,11 @@ Items, skills, capabilities, and effects should not assume a particular genre or
 ## Continuity is visible and recoverable
 
 The consequence journal records what happened and why. Saves, snapshots, and branches preserve a world state that can be revisited without silently rewriting history. Rewinding or continuing a legacy is optional product direction, not an assumption that every story must support.
+
+## Scene continuity and repetition
+
+Planner and writer guidance in all narration profiles treats recent published turns as the scene already established. New prose focuses on the response, changed observation, interaction, or consequence of the current action. Unchanged scenery and unresolved threads stay in the background unless a present action needs them; deliberate reinspection and meaningful transformed callbacks remain valid.
+
+A short wait or reply can finish in a few sentences. An uneventful wait or unanswered question should finish in a short paragraph reporting its result, without separate paragraphs listing what stayed lit, dark, shut, silent, or absent. The word target is a reference, not a minimum, and consecutive quiet turns do not require fresh threats, omens, or interruptions. Real dangers and deadlines still follow their established causes and timing. A mystery can become clearer through observable evidence, but avoiding repetition never authorizes hidden knowledge, a forced payoff, a new player action, or time beyond the resolved interval.
+
+This is generation guidance, not a deterministic repetition gate. It adds no model calls and does not rewrite saved prose. Automatic prompt and route checks cannot establish prose quality; compare fresh model outputs on fixed action/history fixtures before treating the observed repetition problem as resolved.

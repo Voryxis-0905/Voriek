@@ -111,7 +111,8 @@ class NarrationPromptContract(unittest.TestCase):
             self.assertIn(rule, EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
 
     def test_the_experimental_prompts_relax_friction_and_stop_the_old_mandates(self):
-        self.assertIn('Most turns MUST include narrative friction', PLANNER_SYSTEM_PROMPT)
+        self.assertIn('Use narrative friction when an established cause', PLANNER_SYSTEM_PROMPT)
+        self.assertNotIn('Most turns MUST include narrative friction', PLANNER_SYSTEM_PROMPT)
         self.assertNotIn('Most turns MUST include narrative friction', EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
         self.assertIn('not a per-turn requirement', EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
         self.assertIn('their own motives', EXPERIMENTAL_PLANNER_SYSTEM_PROMPT)
@@ -132,7 +133,7 @@ class NarrationPromptContract(unittest.TestCase):
 
         # The writer no longer treats the word target as a quota, and no longer
         # treats the style card as a template every scene must copy.
-        self.assertIn('target roughly `words_per_turn_target` words', WRITER_SYSTEM_PROMPT)
+        self.assertIn('using `words_per_turn_target` as a rough reference, never a minimum', WRITER_SYSTEM_PROMPT)
         self.assertNotIn('target roughly `words_per_turn_target` words', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
         self.assertIn('Let the scene decide the length', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
         self.assertIn('a chapter is a connected dramatic unit', EXPERIMENTAL_WRITER_SYSTEM_PROMPT)

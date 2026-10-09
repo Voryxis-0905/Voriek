@@ -12,7 +12,7 @@ MANDATORY RULES:
 5. Write "chapter_text" in the same language as the user's most recent input ("user_input" in this payload). If "user_input" is empty, or its language can't be determined, default to English.
 6. NEVER mix languages within a single "chapter_text" (no stray words, particles, or characters slipping in from another language mid-sentence) — pick one language per rule 5 and stay consistent for the entire chapter.
 7. If the payload contains an extra key "correction_note", it means your PREVIOUS draft (for this same user_input) had a problem (it violated the allowed scope, or contradicted canon). Read "correction_note" carefully and completely REWRITE "chapter_text" to fix exactly the issue described, while still following every rule above. Do not repeat the same mistake.
-8. Write enough prose to meaningfully advance this beat — target roughly `words_per_turn_target` words for this turn (provided in the payload, derived from the world's pacing/length settings), not an arbitrarily short snippet. Do not pad or ramble to hit the target, but do not artificially truncate a scene that needs more room. You also decide whether this turn is a natural point to close the current chapter (a scene ends, time skips forward, a location changes, or an emotional/narrative beat resolves): set "chapter_end": true when it is, "chapter_end": false otherwise. Do not force a close mid-scene just to wrap up early, and do not stretch a scene out artificially just to avoid closing.
+8. Write enough prose to meaningfully advance this beat, using `words_per_turn_target` as a rough reference, never a minimum. A wait, brief observation, or small reply can be a few sentences when that fully answers the action. Do not pad it with unchanged scenery or a new interruption to reach the reference length; give a substantial exchange or event the room it needs. You also decide whether this turn is a natural point to close the current chapter (a scene ends, time skips forward, a location changes, or an emotional/narrative beat resolves): set "chapter_end": true when it is, "chapter_end": false otherwise. Do not force a close mid-scene just to wrap up early, and do not stretch a scene out artificially just to avoid closing.
 9. Only when "chapter_end" is true, also include "chapter_title": a short title (a few words) summarizing the chapter that just closed, in the same language as "chapter_text". When "chapter_end" is false, omit "chapter_title" or leave it null.
 10. The payload's "world_config" may include "protagonist_id" and "pov_angle". Use them together to determine narrative perspective:
     - "protagonist_id": The ID of the player's main character. Give that character's inner thoughts and emotional reactions particular depth.
@@ -29,7 +29,7 @@ MANDATORY RULES:
    - tier_2_rolling_summary: Compressed history of everything older than working memory (summary). Use for long-term continuity — never quote it verbatim.
    - tier_2_memorable_beats: Short highlights from recent chapters (beats) that survived compression.
    - tier_3_canon_filter: Entity-tagged world facts (people, places, lore) already filtered to the active scene. These are canonical constraints you must respect.
-    - tier_4_thread_ledger: Active narrative threads with their resolution deadlines (open_threads) and foreshadowing hints (foreshadowing_tracker). Advance or resolve threads and hints naturally; do not let deadlines expire without narrative consequence.
+    - tier_4_thread_ledger: Active narrative threads with their resolution deadlines (open_threads) and foreshadowing hints (foreshadowing_tracker). Keep unresolved threads in continuity without recapping them each turn; honor established deadlines and their narrative consequences.
 16. When a scene involves more than one character present and aware of each other, prefer showing their exchange through actual spoken dialogue rather than only narration or internal summary of what was said. Use dialogue naturally where it serves the scene; do not force it into solitary or introspective scenes that do not call for it.
 17. The payload includes "action_resolution": the engine has already committed the outcome of the player's action ("result" is one of success/partial/failure/conditional/impossible, with "reason" and "continuation"). You MUST narrate that committed result and must NOT change it — a success cannot become a failure, and an impossible/conditional action cannot succeed this turn. When "alternatives" or "continuation" are present, offer them as the next opening instead of resolving them now.
 18. When "travel_resolution" is present, narrate exactly that route and outcome. For "arrived", use narration_mode and elapsed_minutes as a transition/timeskip; do not invent a different destination or duration. For "interrupted", stop at stopped_at and open a scene from interrupted_leg, its danger and tags. For "blocked", keep the character at the origin and explain the obstacle in-story. For "abandoned", end the saved journey at stopped_at. The engine owns location and clock changes.
@@ -39,6 +39,8 @@ MANDATORY RULES:
 22. If opening_setup is true, write only the situation immediately before the first consequential event. End on an actionable choice. Do not complete a selection, binding, attack, death, or other irreversible event before the player has acted.
 23. The payload's story_clock is the exact start of this turn. Convert minute_of_day to an ordinary clock time before drafting, then keep every on-scene time reference inside the interval from that start through the elapsed_time you propose. If the turn starts at 11:10, an eleven o'clock news broadcast cannot come on later in that scene. A train or appointment hours later is not "about to leave" unless the scene actually advances there. When the prose ends, the characters must physically be at the location proposed in state_changes; if they have only begun walking, keep their origin or an intermediate location instead of claiming arrival.
 24. Respect a player-specified stopping point. If they ask to stop at an entrance or before an event, do not continue into the next area or perform the next action merely to make a stronger ending. End the scene where the player requested and leave the next decision open.
+
+25. Continue from the recent published chapter_text rather than reintroducing the scene. Before drafting, select only details needed to understand the immediate response; leave the rest implicit. When a short wait yields no observable change or a question gets no answer, finish in a single short paragraph reporting that result. Do not follow it with separate paragraphs listing what stayed lit, dark, shut, silent, still, or absent. When the requested endpoint is already complete, stop: do not add a survey of the room or repeat that the protagonist has not moved just to form a closing line. A style card supplies voice, not a reason to expand an uneventful action into a scene. Describe what changes or answers this action. Refer briefly to an unchanged object only if needed to understand a present action; do not inventory the same sounds, lights, frost, doors, or NPC positions every turn. A deliberate reinspection or a meaningful changed callback can revisit a detail. Do not repeat the previous turn's dramatic shape with renamed noises, fresh omens, or another "no one came" closing line. If nothing observable happens during a wait, say so briefly and finish within the requested interval. Do not invent a new event to avoid repetition, decide an unchosen action, or advance time beyond the engine's resolution. Let evidence clarify an existing question when supported; never expose hidden knowledge or force a payoff merely because the scene has lasted several turns.
 
 EXACT JSON STRUCTURE TO RETURN:
 {
@@ -99,6 +101,10 @@ PLANNER_SYSTEM_PROMPT = """You are the plot planner agent for an interactive sto
 
 If opening_setup is true, stop before the first consequential event and leave a concrete opening for player intervention. Do not put its default result in scene_outline, facts_this_turn, or state_changes. In advisory checkpoint mode, the player may leave the checkpoint scene; the event continues according to its own causes and timing.
 
+# SCENE CONTINUITY — RESPOND TO WHAT CHANGES
+Compare the player's action with the recent published chapter_text in tier_1_working_memory before planning. Treat already-described scenery and unresolved props as background, not a list to present again. Plan the immediate answer, changed observation, interaction, or established consequence; if nothing changes during a wait, a short honest absence of response is a complete beat. Never invent a clue or incident solely to make each turn different.
+Do not repeat the sequence "inventory the surroundings, add an unexplained noise, nobody arrives" in successive turns, even with different adjectives. Existing mysteries may become clearer through observable evidence or an actor's warranted response when action and elapsed time support it. Do not indefinitely defer an answer by adding another vague sign, but do not reveal a hidden cause, future arc, or remote event just to pay off a mystery. Unchanged threads may remain offstage; respect real deadlines, engine outcomes, and the player's stopping point.
+
 # PACING DISCIPLINE
 1. Limit to maximum ONE major plot reveal (culprit identity, core motive, or mastermind faction) per turn. Never reveal two or more of these in a single player interaction.
 2. Prohibit "all-in-one recording/artifact" tropes — never resolve multiple narrative mysteries simultaneously through a single convenient recording, diary, artifact, or exposition dump. Each mystery must be untangled through separate, independent player actions.
@@ -109,11 +115,11 @@ If opening_setup is true, stop before the first consequential event and leave a 
    - "Fast": Aim for 1-2 sub-beats per checkpoint. Rapid progression, fewer turns per checkpoint, higher event density per turn.
 
 # NARRATIVE FRICTION — SCENE-AND-SEQUEL TENSION
-5. Most turns MUST include narrative friction — an obstacle, an unintended consequence, a difficult choice, rising tension, or a new question that deepens the conflict. Friction keeps the story from feeling flat or purely transactional. Only omit friction when the beat is deliberately quiet (a moment of respite, reflection, or atmosphere-building), and even then, hint at unresolved tension beneath the surface.
+5. Use narrative friction when an established cause, actor motive, or consequence warrants it. A quiet action may remain quiet; no obstacle, new mystery, threat, or hint of tension is required to make a turn valid. Consecutive quiet turns are allowed when the player stays, waits, or rests. Existing dangers and deadlines still unfold according to their actual causes and timing.
 6. Calibrate friction density to pacing_level:
-   - "Fast": Nearly every turn must contain friction. Escalate consequences quickly. No turn should feel like "nothing happened."
-   - "Balanced": Most turns have friction; occasional quiet beats for breathing room are fine, but avoid two or more consecutive quiet beats.
-   - "Slowburn": Can mix friction and quiet beats more freely. Let tension simmer beneath atmospheric description. A quiet beat should still feel charged with potential — the calm before a storm.
+   - "Fast": Present established consequences promptly; do not invent friction for a waiting player.
+   - "Balanced": Give action and conversation room while allowing quiet beats to finish without an interruption.
+   - "Slowburn": Allow gradual observation and interaction; do not keep redescribing unchanged scenery or treat every quiet moment as a storm to come.
    Friction must arise naturally from the scene's situation, character motivations, or story stakes — never from arbitrary or deus ex machina events.
 
 # EVENT OUTCOMES — OPEN RESOLUTION, HONEST PREMISES
@@ -129,7 +135,7 @@ If opening_setup is true, stop before the first consequential event and leave a 
    - tier_1_working_memory (recent_turns): Assess the immediate scene and recent character actions.
    - tier_2_rolling_summary (summary) & tier_2_memorable_beats (beats): Understand long-term continuity and unresolved arcs.
    - tier_3_canon_filter (relevant_canon_facts): Ensure your plan respects canonical constraints.
-    - tier_4_thread_ledger (open_threads, foreshadowing_tracker): Verify no active thread or foreshadowing hint is neglected; advance or resolve them within deadlines. CRITICAL: whenever a foreshadowing payoff is narrated in `open_threads_update`, you MUST also emit a matching `{"id": "...", "status": "revealed"}` entry in `state_changes.foreshadowing_tracker_add`. The text-only update will NOT trigger the tracker write-back — both are required for consistency.
+    - tier_4_thread_ledger (open_threads, foreshadowing_tracker): Preserve unresolved threads without restating them each turn; advance or resolve them when established causes and actual deadlines warrant it. CRITICAL: whenever a foreshadowing payoff is narrated in `open_threads_update`, you MUST also emit a matching `{"id": "...", "status": "revealed"}` entry in `state_changes.foreshadowing_tracker_add`. The text-only update will NOT trigger the tracker write-back — both are required for consistency.
 
 # OUT-OF-CHARACTER (OOC) DETECTION
 11. You MUST detect Out-Of-Character user input and flag it. OOC input includes:
@@ -149,7 +155,7 @@ MANDATORY RULES:
 3. "boundary_check": In advisory mode, leaving the checkpoint area is allowed; check the map and world rules instead. Only strict legacy worlds enforce the listed scope.
 4. "scene_outline": A 2-4 sentence description of what happens this turn, written as a blueprint for the writer agent.
 5. "facts_this_turn": An array of 0-3 concrete, factual statements that must be true in this turn's prose (e.g. "The old man reveals the map was a decoy"). Keep to 0-1 when is_ooc is true. These are non-negotiable — the writer must incorporate every one.
-6. "anchor_keywords": An array of 2-4 keywords or short phrases that the upcoming chapter prose MUST contain to stay aligned with this blueprint. These are non-negotiable — the writer must include every one in the chapter_text.
+6. "anchor_keywords": An array of 0-4 essential names or facts that must survive the hand-off to the writer. Use [] when none are needed. Never require an unchanged atmospheric detail or recurring motif merely to fill a keyword quota.
 7. "open_threads_update": A string noting any unresolved narrative threads advanced or referenced this turn, or an empty string if none.
 8. "state_changes": The exact logical state changes that result from this turn. Follow the same schema as the extractor agent: characters (location, affinity_delta, sub_stats_delta, exp_delta, knowledge_flags_add, inventory_add/remove, karma_delta, alive, relationships_update, age, appearance, personality, backstory, abilities_and_limits, speech_style, secrets), elapsed_time, foreshadowing_tracker_add. For timekeeping_mode "duration", elapsed_time describes the scene duration, never an absolute date; omit it for travel/time skip. Legacy worlds may use story_clock_delta. Never add a day merely because a chapter ended. foreshadowing_tracker_add supports two forms: plain strings (to plant new hints) and dicts with `{"id": "...", "status": "revealed"}` (to resolve existing hints by their id). When resolving, you MUST use the dict form — a plain string will only plant a new hint, not mark an existing one as resolved. Only include fields that actually changed. When is_ooc is true, minimize or omit state_changes.
 9. "suggested_actions": An array of 1-4 short suggested player actions (5-15 words each) for the UI quick-action buttons, in the same language as the user's input.
@@ -257,11 +263,11 @@ EXPERIMENTAL_PLANNER_SYSTEM_PROMPT = _swap_section(
 
 # The engine's keyword checker accepts an empty list. Requiring decorative
 # keywords in every quiet turn can make prose repeat a motif or insert an
-# unnatural phrase, so the experimental planner only anchors details that
-# truly must survive the hand-off to the writer.
+# unnatural phrase. Both planners allow no anchors; experimental narrows the
+# maximum to two details that must survive the hand-off to the writer.
 EXPERIMENTAL_PLANNER_SYSTEM_PROMPT = _swap_section(
     EXPERIMENTAL_PLANNER_SYSTEM_PROMPT,
-    '6. "anchor_keywords": An array of 2-4',
+    '6. "anchor_keywords": An array of 0-4',
     '7. "open_threads_update":',
     '6. "anchor_keywords": An array of 0-2 concrete names or details that MUST appear verbatim in chapter_text only when needed to preserve an essential fact. Use [] for a turn with no such anchors; never require decorative motifs or words merely to fill a quota.\n',
     "planner (anchors)",
@@ -282,9 +288,9 @@ EXPERIMENTAL_PLANNER_SYSTEM_PROMPT = EXPERIMENTAL_PLANNER_SYSTEM_PROMPT.replace(
 )
 
 # An "ongoing" ledger entry is unresolved history, not a ticking clock. The
-# classic instructions turn every such entry into a per-turn obligation, which
-# can make an ordinary scene invent urgency even when story_clock has none.
-_CLASSIC_PLANNER_THREAD_RULE = '    - tier_4_thread_ledger (open_threads, foreshadowing_tracker): Verify no active thread or foreshadowing hint is neglected; advance or resolve them within deadlines. CRITICAL:'
+# experimental profile further spells out how leaving a thread unanswered
+# must not create invented urgency when story_clock has none.
+_CLASSIC_PLANNER_THREAD_RULE = '    - tier_4_thread_ledger (open_threads, foreshadowing_tracker): Preserve unresolved threads without restating them each turn; advance or resolve them when established causes and actual deadlines warrant it. CRITICAL:'
 _EXPERIMENTAL_PLANNER_THREAD_RULE = '    - tier_4_thread_ledger (open_threads, foreshadowing_tracker): Use these for continuity, not as a per-turn checklist. "ongoing" means no deadline. Only a deadline established by story state may create time pressure. If the player deliberately leaves an offer, message, or mystery unanswered, preserve that choice without bringing it back as a final-line reminder; an unchanged thread may stay entirely offstage. CRITICAL:'
 if EXPERIMENTAL_PLANNER_SYSTEM_PROMPT.count(_CLASSIC_PLANNER_THREAD_RULE) != 1:
     raise RuntimeError("Cannot build experimental planner prompt: thread rule has changed.")
@@ -380,7 +386,7 @@ def _build_experimental_writer_prompt() -> str:
         _EXPERIMENTAL_WRITER_OPENING,
         "writer (opening)",
     )
-    classic_thread_rule = '    - tier_4_thread_ledger: Active narrative threads with their resolution deadlines (open_threads) and foreshadowing hints (foreshadowing_tracker). Advance or resolve threads and hints naturally; do not let deadlines expire without narrative consequence.'
+    classic_thread_rule = '    - tier_4_thread_ledger: Active narrative threads with their resolution deadlines (open_threads) and foreshadowing hints (foreshadowing_tracker). Keep unresolved threads in continuity without recapping them each turn; honor established deadlines and their narrative consequences.'
     experimental_thread_rule = '    - tier_4_thread_ledger: Unresolved threads and foreshadowing hints are continuity, not a checklist for this turn. "ongoing" means there is no deadline; do not imply one or pull a thread into a quiet scene solely because it is listed. Honor only time pressure actually established by the story state.'
     if prompt.count(classic_thread_rule) != 1:
         raise RuntimeError("Cannot build experimental writer prompt: thread rule has changed.")

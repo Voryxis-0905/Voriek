@@ -2,13 +2,14 @@
 
 Two profiles exist:
 
-* ``classic`` (the default) - the original planner/writer guidance. A request
-  that does not name a mode runs here, so an older client, a script, or a plain
-  ``curl`` call keeps exactly the behaviour it had before this feature existed.
+* ``classic`` (the default) - the baseline planner/writer guidance, with a scene
+  blueprint and checkpoint pacing preferences. A request that does not name a
+  mode runs here. All profiles now allow short quiet turns and share guidance
+  against repeating scenery or manufacturing fresh tension.
 * ``experimental`` - the same engine, the same JSON contracts, the same hard
-  rules, but different *narrative guidance*: a turn is not required to carry
-  friction or end on a cliffhanger, length follows the scene instead of a word
-  target, and present NPCs are planned with their own separate motives.
+  rules, but different *narrative guidance*: checkpoint pacing is advisory, the
+  planner offers scene direction rather than compulsory facts, and present
+  NPCs are planned with their own separate motives.
 
 Two deliberate properties:
 
