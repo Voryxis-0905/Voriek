@@ -56,6 +56,7 @@ from app.story.ensemble import (
     call_actor_stages,
 )
 from app.story.views import narrative_character_view
+from app.story.scene_state import project_scene_state, verification_view, remove_engine_owned_inventory
 from app.story.pacing import CHAPTER_SOFT_CLOSE_WORDS
 from app.story.pacing import CHAPTER_SUMMARY_BUDGET_CEIL
 from app.story.pacing import CHAPTER_SUMMARY_BUDGET_FLOOR
@@ -430,6 +431,9 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             )
 
     base_payload = {
+        "protagonist_inventory": protagonist_entry.get("inventory", []),
+        "eligible_character_locations": {cid: {"name": c.get("name"), "location": c.get("location")}
+                                         for cid, c in active_characters_state.items()},
         "world_canon_facts": world_canon_facts,
         # Per-subject knowledge (what each active character believes, with source
         # and confidence). W02 uses this to keep a scene limited to observers.
@@ -582,9 +586,19 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
                 "note": "Narrator rewrote correctly within scope after being reminded."
             }
 
-    checker_scenes = recent_confirmed_scenes(chapters_data) if is_ensemble(narration_mode) else None
-    checker_characters = (narrative_character_view(active_characters_state)
-                          if is_ensemble(narration_mode) else narrative_characters)
+    checker_scenes = recent_confirmed_scenes(chapters_data, limit=2, max_chars_per_scene=2500)
+    checker_characters = narrative_character_view(active_characters_state)
+    for cid, evidence in verification_view(active_characters_state).items():
+        checker_characters.setdefault(cid, {}).update(evidence)
+
+    def projected_scene_evidence():
+        return project_scene_state(
+            character_state.get("characters", {}), state_changes,
+            protagonist_id=protagonist_id, inventory_resolution=inventory_resolution,
+            travel_resolution=travel_resolution,
+            time_skip_resolution=time_skip_resolution, effect_plan=action_effect_plan,
+            opening_setup=opening_setup,
+        )
     checker_result = run_consistency_checker(
         chapter_text, state_changes, world_config, checkpoint,
         active_cards, checker_characters, world_name=world_name,
@@ -594,8 +608,11 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             "travel_resolution": travel_resolution,
             "time_skip_resolution": time_skip_resolution,
             "opening_setup": opening_setup,
+            **projected_scene_evidence(),
         },
         recent_scenes=checker_scenes,
+        player_action=effective_user_input,
+        ensemble_mode=is_ensemble(narration_mode),
     )
     consistency_rewritten = False
     if checker_result["status"] == "failed":
@@ -635,8 +652,11 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
                 "travel_resolution": travel_resolution,
                 "time_skip_resolution": time_skip_resolution,
                 "opening_setup": opening_setup,
+                **projected_scene_evidence(),
             },
             recent_scenes=checker_scenes,
+            player_action=effective_user_input,
+            ensemble_mode=is_ensemble(narration_mode),
         )
 
     unchecked_commit_allowed = (
@@ -723,20 +743,8 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
         state_changes.pop("story_clock_delta", None)
         state_changes.setdefault("characters", {}).setdefault(protagonist_id, {}).pop("location", None)
 
-    if inventory_resolution:
-        # Explicit inventory commands are committed by the engine. The model may
-        # describe the result but cannot independently add/remove the target.
-        protagonist_changes = state_changes.setdefault("characters", {}).setdefault(protagonist_id, {})
-        protagonist_changes.pop("inventory_add", None)
-        protagonist_changes.pop("inventory_remove", None)
-
-    if any(effect.get("type") in ("inventory_add", "inventory_remove")
-           for effect in action_effect_plan["effects"]):
-        # Declared action consequences own these mutations. Narrator proposals
-        # cannot duplicate or replace them.
-        protagonist_changes = state_changes.setdefault("characters", {}).setdefault(protagonist_id, {})
-        protagonist_changes.pop("inventory_add", None)
-        protagonist_changes.pop("inventory_remove", None)
+    remove_engine_owned_inventory(state_changes, protagonist_id,
+                                 inventory_resolution, action_effect_plan)
 
     elapsed_time_resolution = None
     if world_config.get("timekeeping_mode") == "duration":

@@ -41,3 +41,10 @@ Planner and writer guidance in all narration profiles treats recent published tu
 A short wait or reply can finish in a few sentences. An uneventful wait or unanswered question should finish in a short paragraph reporting its result, without separate paragraphs listing what stayed lit, dark, shut, silent, or absent. The word target is a reference, not a minimum, and consecutive quiet turns do not require fresh threats, omens, or interruptions. Real dangers and deadlines still follow their established causes and timing. A mystery can become clearer through observable evidence, but avoiding repetition never authorizes hidden knowledge, a forced payoff, a new player action, or time beyond the resolved interval.
 
 This is generation guidance, not a deterministic repetition gate. It adds no model calls and does not rewrite saved prose. Automatic prompt and route checks cannot establish prose quality; compare fresh model outputs on fixed action/history fixtures before treating the observed repetition problem as resolved.
+
+
+### Scene inventory/NPC sync — 2026-10-10
+
+A consistency verdict must compare published prose with the location/inventory the engine will actually save, including ignored narrator deltas for engine-owned item commands and executable effects. Missing deltas retain existing ownership/position; accepted-and-consumed NPC responses need giver removal even if the player only offered. Verify all eligible NPC positions, including stale offscene records, without treating eligibility or remote mention as physical presence. Reconcile inherited published on-scene evidence without inventing travel. Invalid owned-item references/quantities fail the bounded rewrite gate. Current evidence: seven regressions, two full HSR turns and three real-model checker samples; long-session, latency and existing-save migration remain open.
+
+The isolated push candidate was checked separately with 231 backend tests and the legacy regression suite. The two HSR live turns above ran on the full local development tree; other movement/checkpoint/knowledge work remains outside this commit.

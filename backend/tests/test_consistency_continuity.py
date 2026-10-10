@@ -1,11 +1,13 @@
 """Checker evidence is saved prose, bounded and opt-in for ensemble only."""
 import sys
+import json
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.story.consistency import build_consistency_checker_payload, recent_confirmed_scenes
+from app.story.consistency import build_consistency_checker_payload, recent_confirmed_scenes, run_consistency_checker
 from app.prompts import ENSEMBLE_CONSISTENCY_CHECKER_SYSTEM_PROMPT
 
 
@@ -51,6 +53,43 @@ class ContinuityEvidenceTests(unittest.TestCase):
         )
         self.assertNotIn('notes', payload['proposed_state_changes'])
         self.assertIn('FALSE_CANON', state_changes['notes'])
+
+
+class CheckerFormatRecoveryTests(unittest.TestCase):
+    invalid = json.dumps({'consistent': False, 'severity': 'minor',
+                          'issues': ['A minor detail.'], 'explanation': 'Ambiguous format.'})
+
+    def check(self):
+        return run_consistency_checker('Jun waits.', {}, {'protagonist_id': 'jun'},
+                                       {}, [], {}, player_action='Wait for the answer.')
+
+    def test_format_retry_can_recover_without_losing_player_action_or_evidence(self):
+        valid = json.dumps({'consistent': True, 'severity': 'minor',
+                            'issues': ['A minor detail.'], 'explanation': 'No blocking contradiction.'})
+        with patch('app.story.consistency.call_llm', side_effect=[self.invalid, valid]) as call:
+            result = self.check()
+        self.assertEqual(result['status'], 'passed')
+        first, retry = [json.loads(c.args[1]) for c in call.call_args_list]
+        self.assertIn('checker_format_correction', retry)
+        retry.pop('checker_format_correction')
+        self.assertEqual(first, retry)
+        self.assertEqual(retry['player_action'], 'Wait for the answer.')
+
+    def test_retry_does_not_normalize_a_real_agency_failure_into_a_pass(self):
+        failed = json.dumps({'consistent': False, 'severity': 'major',
+                             'issues': ['Jun starts an unrequested repair.'],
+                             'explanation': 'Past the stopping point.', 'action_scope': False})
+        with patch('app.story.consistency.call_llm', side_effect=[self.invalid, failed]) as call:
+            result = self.check()
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(result['status'], 'failed')
+        self.assertFalse(result['action_scope'])
+
+    def test_still_invalid_after_one_retry_remains_unavailable(self):
+        with patch('app.story.consistency.call_llm', return_value=self.invalid) as call:
+            result = self.check()
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(result['status'], 'unavailable')
 
 
 if __name__ == '__main__':

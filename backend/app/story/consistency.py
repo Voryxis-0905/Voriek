@@ -88,7 +88,8 @@ def build_consistency_checker_payload(chapter_text: str, state_changes: dict,
                                         active_cards: list,
                                         character_state_before: dict,
                                         engine_outcomes: dict = None,
-                                        recent_scenes: list = None) -> dict:
+                                        recent_scenes: list = None,
+                                        player_action: str = None) -> dict:
     outcomes = engine_outcomes or {}
     start_clock = world_config.get("story_clock", {})
     end_clock = dict(start_clock) if isinstance(start_clock, dict) else {}
@@ -129,14 +130,14 @@ def build_consistency_checker_payload(chapter_text: str, state_changes: dict,
 
     proposed_changes = state_changes
     if recent_scenes is not None and isinstance(state_changes, dict):
-        # Ensemble mode treats published prose plus engine-applied state as
-        # durable evidence. The narrator's free-form synopsis is discarded at
-        # commit and must not become a second, conflicting source of canon.
+        # Published prose plus engine-applied state are the evidence. A free-form
+        # synopsis must not excuse a mismatch between the prose and stored state.
         proposed_changes = {
             key: value for key, value in state_changes.items() if key != "notes"
         }
 
     payload = {
+        "player_action": player_action,
         "fixed_rules": world_config.get("fixed_rules", []),
         "trait_definitions": world_config.get("trait_definitions", {}),
         "titles": world_config.get("titles", []),
@@ -150,11 +151,15 @@ def build_consistency_checker_payload(chapter_text: str, state_changes: dict,
         "proposed_state_changes": proposed_changes,
         "engine_committed_outcomes": outcomes,
         "temporal_spatial_alignment": {
+            "protagonist_id": protagonist_id,
             "clock_at_turn_start": start_clock,
             "clock_after_proposed_turn": end_clock,
             "clock_window_local": f"{clock_label(start_clock)} → {clock_label(end_clock)}",
             "calendar": world_config.get("calendar"),
             "protagonist_location_before": protagonist_before.get("location") if isinstance(protagonist_before, dict) else None,
+            "protagonist_location_change_proposed": bool(
+                isinstance(protagonist_after, dict) and protagonist_after.get("location")
+            ),
             "protagonist_location_after_proposed_turn": expected_location or (
                 protagonist_before.get("location") if isinstance(protagonist_before, dict) else None
             ),
@@ -179,6 +184,7 @@ def _unavailable(explanation: str) -> dict:
         "consistent": None,
         "severity": "none",
         "issues": [],
+        "response_format_invalid": True,
         "explanation": explanation
     }
 
@@ -241,30 +247,56 @@ def run_consistency_checker(chapter_text: str, state_changes: dict, world_config
                              checkpoint: dict, active_cards: list,
                              character_state_before: dict, world_name: str = None,
                              engine_outcomes: dict = None,
-                             recent_scenes: list = None) -> dict:
+                             recent_scenes: list = None,
+                             player_action: str = None,
+                             ensemble_mode: bool = None) -> dict:
     payload = build_consistency_checker_payload(
         chapter_text, state_changes, world_config, checkpoint,
         active_cards, character_state_before, engine_outcomes,
         recent_scenes=recent_scenes,
+        player_action=player_action,
     )
-    try:
-        raw = call_llm(
-            (ENSEMBLE_CONSISTENCY_CHECKER_SYSTEM_PROMPT if recent_scenes is not None
-             else CONSISTENCY_CHECKER_SYSTEM_PROMPT),
-            json.dumps(payload, ensure_ascii=False),
-            mock_response=mock_consistency_checker_response(),
-            world_name=world_name,
-            role="checker"
-        )
-    except LLMCallError as e:
-        return {
-            "status": "unavailable",
-            "consistent": None,
-            "severity": "none",
-            "issues": [],
-            "explanation": f"[CHECKER COULD NOT RUN — unchecked] {e}"
-        }
-    return parse_checker_response(raw)
+    projection_errors = (engine_outcomes or {}).get("state_projection_errors", [])
+    if projection_errors:
+        return {"status": "failed", "consistent": False, "severity": "major",
+                "state_sync": False, "issues": projection_errors,
+                "explanation": "Inventory proposal cannot be applied as narrated."}
+    use_ensemble = recent_scenes is not None if ensemble_mode is None else ensemble_mode
+    system_prompt = (ENSEMBLE_CONSISTENCY_CHECKER_SYSTEM_PROMPT if use_ensemble
+                     else CONSISTENCY_CHECKER_SYSTEM_PROMPT)
+    for attempt in range(2):
+        try:
+            raw = call_llm(
+                system_prompt,
+                json.dumps(payload, ensure_ascii=False),
+                mock_response=mock_consistency_checker_response(),
+                world_name=world_name,
+                role="checker"
+            )
+        except LLMCallError as e:
+            return {
+                "status": "unavailable",
+                "consistent": None,
+                "severity": "none",
+                "issues": [],
+                "explanation": f"[CHECKER COULD NOT RUN — unchecked] {e}"
+            }
+        result = parse_checker_response(raw)
+        if not result.get("response_format_invalid") or attempt == 1:
+            return result
+        # Keep the same scene, player endpoint, and canon evidence. Ask for a
+        # valid decision, never turn an ambiguous/failed response into a pass.
+        payload = dict(payload, checker_format_correction={
+            "problem": result["explanation"],
+            "instruction": (
+                "Return raw JSON with boolean consistent, severity none/minor/major, "
+                "issues as a list, and an explanation. consistent=false requires "
+                "severity=major; none/minor requires consistent=true. Keep any actual "
+                "agency or state contradiction blocking: report action_scope=false or "
+                "state_sync=false and severity=major. Re-evaluate the same supplied "
+                "evidence; do not choose a passing result merely to satisfy the schema."
+            ),
+        })
 
 
 def build_consistency_correction_note(issues: list) -> str:

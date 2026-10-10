@@ -36,6 +36,7 @@ from app.routes import world_routes
 from app.story.narration_mode import normalize_narration_mode
 from app.story.consistency import build_consistency_checker_payload
 from app.prompts import ENSEMBLE_CONSISTENCY_CHECKER_SYSTEM_PROMPT
+from app.prompts import CONSISTENCY_CHECKER_SYSTEM_PROMPT
 
 
 def changed_blocks(old: str, new: str):
@@ -84,7 +85,7 @@ class NarrationPromptContract(unittest.TestCase):
                             for line in writer_blocks[3][0]), starts)
         self.assertTrue(starts[4].startswith('22. If opening_setup is true'), starts)
         self.assertEqual(starts[5], '', starts)
-        self.assertIn('After finishing chapter_text', writer_blocks[5][1][1])
+        self.assertIn('After finishing chapter_text', '\n'.join(writer_blocks[5][1]))
         self.assertTrue(starts[6].lstrip().startswith('"draft_entities"'), starts)
         self.assertIn('"suggested_actions"', writer_blocks[6][1][1])
 
@@ -261,6 +262,82 @@ class NarrationModeRequestTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn(EXPERIMENTAL_PLANNER_SYSTEM_PROMPT, self.systems())
         self.assertIn(EXPERIMENTAL_WRITER_SYSTEM_PROMPT, self.systems())
+
+    def test_checker_receives_player_endpoint_on_initial_check_and_rewrite(self):
+        action = 'Ask Gu Changge a question. Wait for his answer; do not follow him.'
+        checks = []
+
+        def fail_then_pass(system_prompt, user_prompt, **kwargs):
+            if kwargs.get('role') == 'checker':
+                checks.append(json.loads(user_prompt))
+                return json.dumps({'consistent': len(checks) > 1,
+                                   'severity': 'major' if len(checks) == 1 else 'none',
+                                   'issues': ['Player followed without permission.'] if len(checks) == 1 else [],
+                                   'explanation': 'Action endpoint check.',
+                                   'action_scope': len(checks) > 1})
+            return self.fake_llm(system_prompt, user_prompt, **kwargs)
+
+        with patch.object(main, 'call_llm', side_effect=fail_then_pass):
+            response = self.post('chapter/continue', {'user_input': action})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(checks), 2)
+        self.assertEqual([p['player_action'] for p in checks], [action, action])
+        self.assertTrue(response.json()['chapter']['consistency_check']['triggered_rewrite'])
+
+    def test_classic_consumed_handover_rewrite_saves_inventory_and_present_npc_location(self):
+        characters = self.read('character_state.json')
+        characters['characters']['char_xueli']['inventory'] = ['wrapped ration']
+        characters['characters']['char_gu_changge']['location'] = 'Astral Express'
+        self.write('character_state.json', characters)
+        checks = []
+        writes = []
+
+        def handover(system_prompt, user_prompt, **kwargs):
+            payload = json.loads(user_prompt)
+            if kwargs.get('role') == 'checker':
+                checks.append(payload)
+                after = payload['engine_committed_outcomes']['character_state_after_proposed_turn']
+                bad = bool(after['char_xueli']['inventory'])
+                return json.dumps({'consistent': not bad, 'state_sync': not bad,
+                    'severity': 'major' if bad else 'none',
+                    'issues': ['Ration eaten but still owned; present NPC stored offscene.'] if bad else [],
+                    'explanation': 'Compared actual projected save.'})
+            raw = self.fake_llm(system_prompt, user_prompt, **kwargs)
+            if kwargs.get('role') == 'writer':
+                writes.append(payload)
+                self.assertEqual(payload['protagonist_inventory'], ['wrapped ration'])
+                self.assertEqual(payload['eligible_character_locations']['char_gu_changge']['location'],
+                                 'Astral Express')
+                value = json.loads(raw)
+                value['chapter_end'] = False
+                value['chapter_text'] = 'Gu Changge takes the ration beside Xue Li and eats it.'
+                value['state_changes']['characters'] = ({
+                    'char_xueli': {'inventory_remove': ['wrapped ration']},
+                    'char_gu_changge': {'location': characters['characters']['char_xueli']['location']}}
+                    if payload.get('correction_note') else {})
+                return json.dumps(value)
+            return raw
+
+        with patch.object(main, 'call_llm', side_effect=handover):
+            response = self.post('chapter/continue', {'user_input': 'Offer Gu Changge the ration.'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(writes), 2)
+        self.assertEqual(len(checks), 2)
+        self.assertEqual(checks[0]['character_state_before_chapter']['char_gu_changge']['location'],
+                         'Astral Express')
+        saved = self.read('character_state.json')['characters']
+        self.assertEqual(saved['char_xueli']['inventory'], [])
+        self.assertEqual(saved['char_gu_changge']['location'], saved['char_xueli']['location'])
+
+    def test_classic_checker_receives_recent_prose_for_continuity(self):
+        self.assertEqual(self.post('chapter/continue', {'user_input': 'Observe.'}).status_code, 200)
+        prior = self.read('chapters.json')['chapters'][-1]['chapter_text']
+        self.reset_calls()
+        self.assertEqual(self.post('chapter/continue', {'user_input': 'Wait.'}).status_code, 200)
+        checker = next(c for c in self.calls if c['role'] == 'checker')
+        self.assertEqual(checker['system_prompt'], CONSISTENCY_CHECKER_SYSTEM_PROMPT)
+        payload = json.loads(checker['user_prompt'])
+        self.assertEqual(payload['recent_confirmed_scenes'][-1]['chapter_text'], prior)
 
     def test_ensemble_calls_present_npc_and_keeps_its_cue_in_writer_payload(self):
         response = self.post('chapter/continue', {
