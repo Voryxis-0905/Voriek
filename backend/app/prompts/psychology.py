@@ -16,6 +16,7 @@ MANDATORY RULES:
 7. "impression_of_others": Object mapping other character IDs to a short impression (e.g. {"char_2": "seems nervous and evasive"}).
 8. "decision": A short phrase describing what they are inclined to do next (e.g. "approach cautiously", "stay back and observe", "intervene immediately").
 9. Read the entire chapter_text through its final sentence before describing what remains to do. Do not claim that a character has not eaten, spoken, arrived, or finished an action if the scene shows they did. An opportunity or decision must still be open AFTER the scene ends; a completed meal or completed conversation is not a future goal. The character may misunderstand another person's motives, but not erase an observable action they witnessed.
+10. Use chapter_text for witnessed actions, character_knowledge for this character's prior information, and relationship_memories for remembered interactions. An instruction, offer, intention or forbidden action is not a completed event. If Rinn stops on his side of a cordon, do not say he crossed it. Mark guesses about motives as suspicions; hearsay stays attributed to its source. Do not supply future checkpoint events, off-scene discoveries, or another character's private thoughts from general world knowledge.
 
 Write in the same language as the chapter_text provided in the payload.
 

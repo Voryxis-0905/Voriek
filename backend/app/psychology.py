@@ -80,7 +80,6 @@ def generate_perception_for_character(
             {"id": cid, "name": st.get("name", cid), "realm": st.get("power_stat", {}).get("realm", "")}
             for cid, st in all_characters.items() if cid != character_id
         ],
-        "checkpoint_description": checkpoint.get("description", ""),
         "world_tone": world_config.get("tone", "neutral")
     }
     if is_experimental(narration_mode):
