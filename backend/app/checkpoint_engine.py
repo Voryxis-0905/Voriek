@@ -1,3 +1,4 @@
+from copy import deepcopy
 """Orchestration and compatibility exports; implementations live in focused modules."""
 from app.rag import select_relevant_lore_cards
 from app.state_manager import _apply_outcome_payload
@@ -241,7 +242,8 @@ def advance_checkpoint_if_ready(canon_timeline: dict, world_config: dict,
         "to_checkpoint_description": "",
         "cards_unlocked": [],
         "realm_changes": {},
-        "applied_effects": []
+        "applied_effects": [],
+        "ignored_location_changes": []
     }
 
     if not next_id_to_advance:
@@ -251,7 +253,24 @@ def advance_checkpoint_if_ready(canon_timeline: dict, world_config: dict,
     if not next_checkpoint:
         return result
 
-    if selected_outcome_payload:
+    if isinstance(selected_outcome_payload, dict) and selected_outcome_payload:
+        # This runs after the scene has been checked. A checkpoint may progress
+        # offstage, but cannot manufacture a journey for the viewpoint player.
+        # Preserve the authored timeline and all non-location consequences.
+        selected_outcome_payload = deepcopy(selected_outcome_payload)
+        protagonist_id = world_config.get("protagonist_id", "")
+        changes = selected_outcome_payload.get("characters", {})
+        player_changes = changes.get(protagonist_id) if isinstance(changes, dict) else None
+        if isinstance(player_changes, dict) and "location" in player_changes:
+            requested = player_changes.pop("location")
+            retained = character_state.get(protagonist_id, {}).get("location", "")
+            if requested and requested != retained:
+                result["ignored_location_changes"].append({
+                    "character_id": protagonist_id,
+                    "requested_location": requested,
+                    "retained_location": retained,
+                    "reason": "checkpoint_transition_is_not_player_travel",
+                })
         _apply_outcome_payload(character_state, selected_outcome_payload, world_config)
 
     completed = world_config.setdefault("completed_checkpoints", [])

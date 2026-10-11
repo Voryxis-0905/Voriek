@@ -10,7 +10,8 @@ def _is_location_in_zone(location: str, allowed_locations: set) -> bool:
         allowed_lower = allowed.lower().strip()
         if loc_lower == allowed_lower:
             return True
-        if loc_lower.startswith(allowed_lower + " - "):
+        if any(loc_lower.startswith(allowed_lower + separator)
+               for separator in (" - ", " — ", " – ", " (")):
             return True
     return False
 
@@ -74,6 +75,14 @@ def raise_boundary_hard_reject(
         lang = detect_story_language(user_input=user_input, recent_text=recent_text, world_config=world_config)
 
     tmpl = BOUNDARY_HARD_REJECT_TEMPLATES.get(lang, BOUNDARY_HARD_REJECT_TEMPLATES["en"])
+    movement = [v for v in violations if isinstance(v, dict)
+                and v.get("kind") == "unsupported_protagonist_movement"]
+    if movement:
+        details = "; ".join(
+            f"{v.get('origin', '')!r} -> {v.get('proposed', '')!r}: {v['reason']}"
+            for v in movement
+        )
+        raise HTTPException(status_code=409, detail=f"Player movement blocked: {details}")
     if violations and all(isinstance(v, dict) and v.get("reason") for v in violations):
         details = "; ".join(
             f"{v.get('attempted_location', '?')}: {v['reason']} "

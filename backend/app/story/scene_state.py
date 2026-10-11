@@ -13,6 +13,17 @@ def remove_engine_owned_inventory(changes, protagonist_id, inventory_resolution,
         player.pop("inventory_remove", None)
 
 
+def resolved_travel_location(origin, proposed, travel_resolution):
+    """The route owns the destination zone; prose may refine its local endpoint."""
+    from app.world.boundaries import _is_location_in_zone
+    travel = travel_resolution or {}
+    landed = (travel.get("destination") if travel.get("status") == "arrived"
+              else travel.get("stopped_at", origin))
+    if isinstance(proposed, str) and landed and _is_location_in_zone(proposed, {str(landed)}):
+        return proposed
+    return landed
+
+
 def verification_view(characters):
     return {cid: deepcopy({key: state[key] for key in
                           ("name", "location", "inventory", "alive", "knowledge_flags")
@@ -55,8 +66,8 @@ def project_scene_state(characters, changes, *, protagonist_id, inventory_resolu
         player = after.setdefault(protagonist_id, {})
         travel = travel_resolution or {}
         if travel.get("status") in ("arrived", "interrupted"):
-            player["location"] = (travel.get("destination") if travel["status"] == "arrived"
-                                  else travel.get("stopped_at", characters.get(protagonist_id, {}).get("location")))
+            player["location"] = resolved_travel_location(
+                characters.get(protagonist_id, {}).get("location"), player.get("location"), travel)
         elif time_skip_resolution:
             player["location"] = characters.get(protagonist_id, {}).get("location")
         elif declared_move:

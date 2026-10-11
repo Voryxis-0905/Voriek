@@ -108,7 +108,10 @@ class NarrationPromptContract(unittest.TestCase):
             'The engine owns location and clock changes.',
             'NEVER mix languages within a single',
             'You may only mention characters listed in the provided',
+            '26. Return "state_changes" derived from the FINAL chapter_text',
+            '  "state_changes": {"characters": {}},',
         ):
+            self.assertIn(rule, WRITER_SYSTEM_PROMPT)
             self.assertIn(rule, EXPERIMENTAL_WRITER_SYSTEM_PROMPT)
 
     def test_the_experimental_prompts_relax_friction_and_stop_the_old_mandates(self):
@@ -284,6 +287,91 @@ class NarrationModeRequestTests(unittest.TestCase):
         self.assertEqual([p['player_action'] for p in checks], [action, action])
         self.assertTrue(response.json()['chapter']['consistency_check']['triggered_rewrite'])
 
+    def test_non_movement_scene_preserves_legacy_clock_delta(self):
+        def clock_scene(system_prompt, user_prompt, **kwargs):
+            raw = self.fake_llm(system_prompt, user_prompt, **kwargs)
+            if kwargs.get('role') == 'writer':
+                value = json.loads(raw)
+                value['state_changes']['story_clock_delta'] = {'day': 2, 'time_of_day': 'evening'}
+                return json.dumps(value)
+            return raw
+
+        with patch.object(main, 'call_llm', side_effect=clock_scene):
+            response = self.post('chapter/continue', {'user_input': 'Observe the courtyard.'})
+        self.assertEqual(response.status_code, 200, response.text)
+        clock = self.read('world_config.json')['story_clock']
+        self.assertEqual(clock['day'], 3)
+        self.assertEqual(clock['time_of_day'], 'evening')
+
+    def test_confirmed_local_step_keeps_its_location_through_commit(self):
+        config = self.read('world_config.json')
+        config['checkpoint_boundary_mode'] = 'advisory'
+        self.write('world_config.json', config)
+        characters = self.read('character_state.json')
+        characters['characters']['char_xueli']['location'] = 'Base Zone (plant room)'
+        self.write('character_state.json', characters)
+        self.write('location_map.json', {'locations': [
+            {'id': 'base', 'name': 'Base Zone', 'discovery_status': 'discovered', 'connected_to': []}]})
+
+        def local_step(system_prompt, user_prompt, **kwargs):
+            raw = self.fake_llm(system_prompt, user_prompt, **kwargs)
+            if kwargs.get('role') == 'writer':
+                value = json.loads(raw)
+                value['chapter_text'] = 'Xue Li steps into the adjacent service corridor and stops there.'
+                value['chapter_end'] = False
+                value['state_changes']['characters']['char_xueli'] = {'location': 'Base Zone (service corridor)'}
+                return json.dumps(value)
+            return raw
+
+        with patch.object(main, 'call_llm', side_effect=local_step):
+            response = self.post('chapter/continue', {'user_input': 'Step into the adjacent corridor and stop.'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.read('character_state.json')['characters']['char_xueli']['location'],
+                         'Base Zone (service corridor)')
+
+    def test_missing_local_endpoint_is_rewritten_and_saved(self):
+        config = self.read('world_config.json')
+        config['checkpoint_boundary_mode'] = 'advisory'
+        self.write('world_config.json', config)
+        characters = self.read('character_state.json')
+        characters['characters']['char_xueli']['location'] = 'Base Zone (service corridor)'
+        self.write('character_state.json', characters)
+        self.write('location_map.json', {'locations': [
+            {'id': 'base', 'name': 'Base Zone', 'discovery_status': 'discovered', 'connected_to': []}]})
+        checker_payloads = []
+        writes = []
+
+        def doorway(system_prompt, user_prompt, **kwargs):
+            payload = json.loads(user_prompt)
+            if kwargs.get('role') == 'checker':
+                checker_payloads.append(payload)
+                position = payload['temporal_spatial_alignment']['protagonist_location_after_proposed_turn']
+                synced = position == 'Base Zone (plant-room doorway)'
+                return json.dumps({'consistent': synced, 'severity': 'none' if synced else 'major',
+                    'issues': [] if synced else ['Prose ends at the doorway; saved position remains in corridor.'],
+                    'state_sync': synced, 'explanation': 'Check the local endpoint.'})
+            raw = self.fake_llm(system_prompt, user_prompt, **kwargs)
+            if kwargs.get('role') == 'writer':
+                writes.append(payload)
+                value = json.loads(raw)
+                value['chapter_text'] = 'Xue Li returns along the corridor and stops in the plant-room doorway.'
+                value['chapter_end'] = False
+                value['state_changes']['characters'] = {}
+                if payload.get('correction_note'):
+                    value['state_changes']['characters']['char_xueli'] = {'location': 'Base Zone (plant-room doorway)'}
+                return json.dumps(value)
+            return raw
+
+        with patch.object(main, 'call_llm', side_effect=doorway):
+            response = self.post('chapter/continue', {'user_input': 'Walk back to the plant-room doorway and stop.'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(writes), 2)
+        self.assertEqual(len(checker_payloads), 2)
+        self.assertFalse(checker_payloads[0]['temporal_spatial_alignment']['protagonist_location_change_proposed'])
+        self.assertTrue(checker_payloads[1]['temporal_spatial_alignment']['protagonist_location_change_proposed'])
+        self.assertEqual(self.read('character_state.json')['characters']['char_xueli']['location'],
+                         'Base Zone (plant-room doorway)')
+
     def test_classic_consumed_handover_rewrite_saves_inventory_and_present_npc_location(self):
         characters = self.read('character_state.json')
         characters['characters']['char_xueli']['inventory'] = ['wrapped ration']
@@ -329,6 +417,115 @@ class NarrationModeRequestTests(unittest.TestCase):
         self.assertEqual(saved['char_xueli']['inventory'], [])
         self.assertEqual(saved['char_gu_changge']['location'], saved['char_xueli']['location'])
 
+    def test_travel_arrival_keeps_precise_writer_endpoint_in_checker_and_commit(self):
+        config = self.read('world_config.json')
+        config['checkpoint_boundary_mode'] = 'advisory'
+        self.write('world_config.json', config)
+        characters = self.read('character_state.json')
+        characters['characters']['char_xueli']['location'] = 'Base Zone'
+        self.write('character_state.json', characters)
+        self.write('location_map.json', {'locations': [
+            {'id': 'base', 'name': 'Base Zone', 'discovery_status': 'discovered',
+             'connected_to': [{'location_id': 'supply', 'travel_time_minutes': 10}]},
+            {'id': 'supply', 'name': 'Supply Zone', 'discovery_status': 'discovered', 'connected_to': []}]})
+        checks = []
+
+        def arrival(system_prompt, user_prompt, **kwargs):
+            if kwargs.get('role') == 'checker':
+                checks.append(json.loads(user_prompt))
+            raw = self.fake_llm(system_prompt, user_prompt, **kwargs)
+            if kwargs.get('role') == 'writer':
+                value = json.loads(raw)
+                value['chapter_end'] = False
+                value['chapter_text'] = 'Xue Li arrives in Supply Zone and stops on the Railway Platform.'
+                value['state_changes']['characters'] = {
+                    'char_xueli': {'location': 'Supply Zone - Railway Platform'}}
+                return json.dumps(value)
+            return raw
+
+        with patch.object(main, 'call_llm', side_effect=arrival):
+            response = self.post('chapter/continue', {'user_input': 'Walk to Supply Zone and wait there.'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(checks[-1]['temporal_spatial_alignment']['protagonist_location_after_proposed_turn'],
+                         'Supply Zone - Railway Platform')
+        self.assertEqual(self.read('character_state.json')['characters']['char_xueli']['location'],
+                         'Supply Zone - Railway Platform')
+
+    def test_ten_turn_movement_clock_and_restore_sequence(self):
+        from app.world.calendar_clock import normalize_start_clock
+        config = self.read('world_config.json')
+        config.update(checkpoint_boundary_mode='advisory', timekeeping_mode='duration',
+                      calendar={'kind': 'gregorian'},
+                      story_clock=normalize_start_clock({'year': 2026, 'month': 10, 'day': 11,
+                                                        'minute_of_day': 480}, {'kind': 'gregorian'}))
+        self.write('world_config.json', config)
+        characters = self.read('character_state.json')
+        characters['characters']['char_xueli'].update(location='Base Zone', inventory=['sealed ration'])
+        self.write('character_state.json', characters)
+        self.write('location_map.json', {'locations': [
+            {'id': 'base', 'name': 'Base Zone', 'discovery_status': 'discovered',
+             'connected_to': [{'location_id': 'supply', 'travel_time_minutes': 10}]},
+            {'id': 'supply', 'name': 'Supply Zone', 'discovery_status': 'discovered',
+             'connected_to': [{'location_id': 'base', 'travel_time_minutes': 10}]}]})
+
+        def scene(system_prompt, user_prompt, **kwargs):
+            raw = self.fake_llm(system_prompt, user_prompt, **kwargs)
+            if kwargs.get('role') == 'writer':
+                payload = json.loads(user_prompt)
+                value = json.loads(raw)
+                travel = payload.get('travel_resolution') or {}
+                value['chapter_end'] = False
+                value['state_changes'] = {'characters': {}, 'elapsed_time': {'seconds': 30}}
+                if travel.get('status') == 'arrived':
+                    value['chapter_text'] = 'Xue Li arrives in ' + travel['destination'] + ' and stops.'
+                elif payload.get('user_input') == 'Step into the adjacent corridor and stop.':
+                    value['chapter_text'] = 'Xue Li steps into the Base Zone service corridor and stops.'
+                    value['state_changes']['characters'] = {'char_xueli': {'location': 'Base Zone (service corridor)'}}
+                else:
+                    value['chapter_text'] = 'Xue Li observes briefly, remaining where she stands.'
+                return json.dumps(value)
+            return raw
+
+        sequence = [
+            ('Ask how to go to Supply Zone and wait for the answer.', 'Base Zone', 30),
+            ('Step into the adjacent corridor and stop.', 'Base Zone (service corridor)', 30),
+            ('Wait here briefly.', 'Base Zone (service corridor)', 30),
+            ('Go to Supply Zone and wait there.', 'Supply Zone', 600),
+            ('Look toward Base Zone. Remain in Supply Zone.', 'Supply Zone', 30),
+            ('Go to Base Zone. Do not follow anyone to Supply Zone.', 'Base Zone', 600),
+            ('Look around without moving.', 'Base Zone', 30),
+            ('Walk from Base Zone to Supply Zone.', 'Supply Zone', 600),
+            ('Ask how to go to Base Zone and wait for the answer.', 'Supply Zone', 30),
+            ('Walk from Supply Zone to Base Zone.', 'Base Zone', 600),
+        ]
+        elapsed = 0
+        snapshot = None
+        save_id = None
+        with patch.object(main, 'call_llm', side_effect=scene):
+            for index, (action, endpoint, seconds) in enumerate(sequence, 1):
+                response = self.post('chapter/continue', {'user_input': action})
+                self.assertEqual(response.status_code, 200, (index, response.text))
+                elapsed += seconds
+                saved_chars = self.read('character_state.json')
+                saved_clock = self.read('world_config.json')['story_clock']
+                self.assertEqual(saved_chars['characters']['char_xueli']['location'], endpoint, index)
+                self.assertEqual(saved_chars['characters']['char_xueli']['inventory'], ['sealed ration'])
+                self.assertEqual(saved_clock['elapsed_seconds'], elapsed, index)
+                self.assertEqual(len(self.read('chapters.json')['chapters']), index)
+                if index == 4:
+                    snapshot = (saved_chars, saved_clock, self.read('chapters.json'))
+                    save = self.post('saves', {'label': 'Movement at turn four'})
+                    self.assertEqual(save.status_code, 200, save.text)
+                    save_id = save.json()['save']['save_id']
+            with TestClient(main.app) as reopened:
+                state = reopened.get(f'/worlds/{self.world}')
+                self.assertEqual(state.status_code, 200)
+            restored = self.post(f'saves/{save_id}/restore')
+            self.assertEqual(restored.status_code, 200, restored.text)
+            self.assertEqual(self.read('character_state.json'), snapshot[0])
+            self.assertEqual(self.read('world_config.json')['story_clock'], snapshot[1])
+            self.assertEqual(self.read('chapters.json'), snapshot[2])
+
     def test_classic_checker_receives_recent_prose_for_continuity(self):
         self.assertEqual(self.post('chapter/continue', {'user_input': 'Observe.'}).status_code, 200)
         prior = self.read('chapters.json')['chapters'][-1]['chapter_text']
@@ -338,6 +535,42 @@ class NarrationModeRequestTests(unittest.TestCase):
         self.assertEqual(checker['system_prompt'], CONSISTENCY_CHECKER_SYSTEM_PROMPT)
         payload = json.loads(checker['user_prompt'])
         self.assertEqual(payload['recent_confirmed_scenes'][-1]['chapter_text'], prior)
+
+    def test_consistency_rewrite_cannot_bypass_player_movement_validation(self):
+        config = self.read('world_config.json')
+        config['checkpoint_boundary_mode'] = 'advisory'
+        self.write('world_config.json', config)
+        characters = self.read('character_state.json')
+        characters['characters']['char_xueli']['location'] = 'Base Zone'
+        self.write('character_state.json', characters)
+        self.write('location_map.json', {'locations': [
+            {'id': 'base', 'name': 'Base Zone', 'discovery_status': 'discovered', 'connected_to': []},
+            {'id': 'supply', 'name': 'Supply Zone', 'discovery_status': 'discovered', 'connected_to': []}]})
+        chapters_before = self.read('chapters.json')
+
+        def unsupported_rewrite(system_prompt, user_prompt, **kwargs):
+            if kwargs.get('role') == 'checker':
+                return json.dumps({'consistent': False, 'severity': 'major',
+                    'issues': ['Rewrite the observation.'], 'explanation': 'Needs correction.'})
+            raw = self.fake_llm(system_prompt, user_prompt, **kwargs)
+            if kwargs.get('role') == 'writer':
+                value = json.loads(raw)
+                value['chapter_end'] = False
+                value['state_changes']['characters'] = {}
+                if json.loads(user_prompt).get('correction_note'):
+                    value['chapter_text'] = 'Xue Li arrives in Supply Zone.'
+                    value['state_changes']['characters']['char_xueli'] = {'location': 'Supply Zone'}
+                else:
+                    value['chapter_text'] = 'Xue Li observes Base Zone.'
+                return json.dumps(value)
+            return raw
+
+        with patch.object(main, 'call_llm', side_effect=unsupported_rewrite):
+            response = self.post('chapter/continue', {'user_input': 'Observe Base Zone without moving.'})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn('Supply Zone', response.json()['detail'])
+        self.assertEqual(self.read('character_state.json'), characters)
+        self.assertEqual(self.read('chapters.json'), chapters_before)
 
     def test_ensemble_calls_present_npc_and_keeps_its_cue_in_writer_payload(self):
         response = self.post('chapter/continue', {

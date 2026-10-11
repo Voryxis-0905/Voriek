@@ -56,7 +56,7 @@ from app.story.ensemble import (
     call_actor_stages,
 )
 from app.story.views import narrative_character_view
-from app.story.scene_state import project_scene_state, verification_view, remove_engine_owned_inventory
+from app.story.scene_state import project_scene_state, verification_view, remove_engine_owned_inventory, resolved_travel_location
 from app.story.pacing import CHAPTER_SOFT_CLOSE_WORDS
 from app.story.pacing import CHAPTER_SUMMARY_BUDGET_CEIL
 from app.story.pacing import CHAPTER_SUMMARY_BUDGET_FLOOR
@@ -84,6 +84,50 @@ import os
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+def _check_protagonist_movement(state_changes: dict, *, protagonist_id: str, origin: str,
+                                travel_resolution: dict, declared_move: str,
+                                narrator_input: str, location_map: dict = None) -> list:
+    """Violations for a protagonist location the engine did not authorise.
+
+    Returns [] when the writer left the protagonist where they were, when the
+    engine's travel path put them somewhere, when a declared movement effect
+    moved them, or when the new place is inside the place they were already in.
+    Anything else is the narrator performing a journey nobody made, and is
+    reported as a violation so the turn is corrected or rejected before it is
+    written -- never committed with the prose and the state disagreeing.
+    """
+    from app.world.movement import (classify_movement, location_change_authorised,
+                                    movement_correction_note)
+    characters = state_changes.get("characters")
+    if not isinstance(characters, dict):
+        return []
+    changes = characters.get(protagonist_id)
+    if not isinstance(changes, dict):
+        return []
+    proposed = changes.get("location")
+    if not isinstance(proposed, str) or not proposed.strip():
+        return []
+
+    verdict = location_change_authorised(
+        origin=origin, proposed=proposed.strip(),
+        travel_resolution=travel_resolution, declared_move=declared_move,
+        location_map=location_map,
+    )
+    if verdict.get("ok"):
+        return []
+
+    kind = (travel_resolution or {}).get("movement_kind") or classify_movement(narrator_input)["kind"]
+    return [{
+        "kind": "unsupported_protagonist_movement",
+        "reason": verdict.get("why", "unsupported_location_change"),
+        "detail": verdict.get("detail", ""),
+        "origin": origin,
+        "proposed": proposed.strip(),
+        "movement_kind": kind,
+        "note": movement_correction_note(origin, proposed.strip(), kind),
+    }]
 
 
 def _recent_confirmed_turns(chapters_data: dict, witness_id: str,
@@ -383,6 +427,7 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
     projected_action_effects = project_action_effects(action_effect_plan)
     action_resolution["engine_effects"] = projected_action_effects["effects"]
     action_resolution["rejected_effects"] = projected_action_effects["rejected"]
+    declared_move = ""
     from app.story.inventory import resolve_inventory_action
     inventory_resolution = resolve_inventory_action(
         narrator_input, protagonist_entry.get("inventory", []) if isinstance(protagonist_entry, dict) else [],
@@ -400,13 +445,25 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             load_discoveries(state_dir),
         )
 
-    from app.world.travel import build_travel_plan, find_location
-    travel_resolution = build_travel_plan(
+    # 2.2: whether the input moves the player at all is a separate question from
+    # where to. `resolve_movement` distinguishes looking for a way, asking,
+    # planning and refusing from actually departing, and only a commitment goes
+    # on to the route/unlock/time checks below. 2.1 asked only
+    # `build_travel_plan`, which recognised input beginning `travel to` or
+    # `go to` and nothing else, so every other phrasing produced no travel
+    # resolution -- and the narrator then moved the player itself.
+    from app.world.movement import resolve_movement, find_named_destination
+    from app.world.travel import find_location
+    travel_resolution = resolve_movement(
         narrator_input, location_map or {}, scene_location,
         tick_minutes=int(world_config.get("travel_tick_minutes", 60) or 60),
         seed_key=f"{world_name}|{story_clock.get('tick', 0)}",
         active_journey=world_config.get("active_journey"),
     )
+    # A time skip whose stated action includes arriving is a move too: the same
+    # `resolve_movement` call above sees the player's own words, so "I spend the
+    # afternoon travelling to the Supply Zone" resolves as travel rather than as
+    # a skip that teleports. The state guard below then keeps the two consistent.
     if travel_resolution and travel_resolution.get("status") == "arrived":
         destination_node = find_location(location_map or {}, travel_resolution.get("destination", ""))
         if destination_node and destination_node.get("discovery_status", "discovered") in ("unknown", "creator_only"):
@@ -547,7 +604,17 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
         state_changes, location_map,
         character_state.get("characters", {}), world_config
     )
-    all_violations = violations + map_violations
+    # 2.2: the narrator does not get to perform a journey. A location change it
+    # proposes for the protagonist has to be authorised by the engine's travel
+    # path, by a declared movement effect, or by staying inside the place they
+    # are already in. Checked before the turn is written, so prose and state can
+    # never disagree about where the player is.
+    movement_violations = _check_protagonist_movement(
+        state_changes, protagonist_id=protagonist_id, origin=scene_location,
+        travel_resolution=travel_resolution, declared_move=declared_move,
+        narrator_input=narrator_input, location_map=location_map,
+    )
+    all_violations = violations + map_violations + movement_violations
 
     if all_violations:
         correction_parts = []
@@ -555,8 +622,10 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             correction_parts.append(build_boundary_correction_note(violations, checkpoint))
         if map_violations:
             correction_parts.append(build_map_restriction_note(map_violations))
+        if movement_violations:
+            correction_parts.append(movement_violations[0].get("note", ""))
         retry_payload = dict(base_payload)
-        retry_payload["correction_note"] = "\n\n".join(correction_parts)
+        retry_payload["correction_note"] = "\n\n".join(p for p in correction_parts if p)
         chapter_text, state_changes, chapter_end, chapter_title, suggested_actions, draft_entities, _editor_polished, anchor_keywords, open_threads_update, _, _, missing_anchor_keywords, steps, variants, perception_data = call_writer_stage(
             retry_payload, scene_outline, facts_this_turn, state_changes,
             suggested_actions, anchor_keywords, open_threads_update,
@@ -570,10 +639,17 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             state_changes, location_map,
             character_state.get("characters", {}), world_config
         )
-        all_violations_after = violations_after_retry + map_violations_after_retry
+        movement_violations_after = _check_protagonist_movement(
+            state_changes, protagonist_id=protagonist_id, origin=scene_location,
+            travel_resolution=travel_resolution, declared_move=declared_move,
+            narrator_input=narrator_input, location_map=location_map,
+        )
+        all_violations_after = (violations_after_retry + map_violations_after_retry
+                                + movement_violations_after)
         if all_violations_after:
             raise_boundary_hard_reject(
-                violations_after_retry or map_violations_after_retry, checkpoint,
+                violations_after_retry or map_violations_after_retry
+                or movement_violations_after, checkpoint,
                 user_input=narrator_input,
                 recent_text=running_summary,
                 world_config=world_config
@@ -595,7 +671,7 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
         return project_scene_state(
             character_state.get("characters", {}), state_changes,
             protagonist_id=protagonist_id, inventory_resolution=inventory_resolution,
-            travel_resolution=travel_resolution,
+            travel_resolution=travel_resolution, declared_move=declared_move,
             time_skip_resolution=time_skip_resolution, effect_plan=action_effect_plan,
             opening_setup=opening_setup,
         )
@@ -632,10 +708,16 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             state_changes, location_map,
             character_state.get("characters", {}), world_config
         )
-        all_violations_after_cc = violations_after_cc + map_violations_after_cc
+        movement_violations_after_cc = _check_protagonist_movement(
+            state_changes, protagonist_id=protagonist_id, origin=scene_location,
+            travel_resolution=travel_resolution, declared_move=declared_move,
+            narrator_input=narrator_input, location_map=location_map,
+        )
+        all_violations_after_cc = (violations_after_cc + map_violations_after_cc
+                                   + movement_violations_after_cc)
         if all_violations_after_cc:
             raise_boundary_hard_reject(
-                violations_after_cc or map_violations_after_cc, checkpoint,
+                violations_after_cc or map_violations_after_cc or movement_violations_after_cc, checkpoint,
                 user_input=narrator_input,
                 recent_text=running_summary,
                 world_config=world_config
@@ -724,24 +806,34 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
             }
         )
 
-    # The model narrates travel but cannot override the engine-owned destination
-    # or elapsed time. A blocked route always leaves the protagonist in place.
-    if travel_resolution:
-        protagonist_changes = state_changes.setdefault("characters", {}).setdefault(protagonist_id, {})
-        if travel_resolution.get("status") in ("arrived", "interrupted"):
-            protagonist_changes["location"] = (
-                travel_resolution.get("destination") if travel_resolution.get("status") == "arrived"
-                else travel_resolution.get("stopped_at", scene_location)
-            )
-        else:
+    # The engine owns the protagonist's position. The writer's own proposal has
+    # already been checked above; this is where the engine's answer is written,
+    # so the two can only ever agree.
+    protagonist_changes = state_changes.setdefault("characters", {}).setdefault(protagonist_id, {})
+    if travel_resolution and travel_resolution.get("status") in ("arrived", "interrupted"):
+        protagonist_changes["location"] = resolved_travel_location(
+            scene_location, protagonist_changes.get("location"), travel_resolution)
+    elif declared_move:
+        protagonist_changes["location"] = declared_move
+    elif travel_resolution:
+        from app.world.movement import location_change_authorised
+        if not location_change_authorised(
+                origin=scene_location,
+                proposed=str(protagonist_changes.get("location") or ""),
+                travel_resolution=travel_resolution,
+                declared_move=declared_move, location_map=location_map)["ok"]:
             protagonist_changes.pop("location", None)
+    if time_skip_resolution or (travel_resolution and travel_resolution.get("status") != "not_a_move"):
+        # Ordinary scenes in legacy worlds still use their declared clock
+        # delta. Only engine-owned travel/time skips replace that proposal.
         state_changes.pop("story_clock_delta", None)
 
     if time_skip_resolution:
-        # Elapsed time is engine-owned. A time skip does not silently teleport
-        # the player; travel remains a separate explicit action.
-        state_changes.pop("story_clock_delta", None)
-        state_changes.setdefault("characters", {}).setdefault(protagonist_id, {}).pop("location", None)
+        # Elapsed time is engine-owned, and a time skip is not a teleport: the
+        # position changes only when the skip's own stated action was a journey
+        # the engine resolved above.
+        if not (travel_resolution and travel_resolution.get("status") in ("arrived", "interrupted")):
+            protagonist_changes.pop("location", None)
 
     remove_engine_owned_inventory(state_changes, protagonist_id,
                                  inventory_resolution, action_effect_plan)
@@ -751,7 +843,14 @@ def _generate_chapter(world_name: str, narrator_input: str, display_input: str =
         from app.world.calendar_clock import normalize_elapsed_time
         proposal = state_changes.pop("elapsed_time", None)
         state_changes.pop("story_clock_delta", None)
-        if not travel_resolution and not time_skip_resolution:
+        # 2.2: `travel_resolution` is now always present, because not moving is a
+        # result worth telling the writer about. So the question is no longer
+        # "is there a resolution?" but "did a journey actually happen?" — a
+        # scene's own elapsed time is still the model's to propose on every other
+        # turn.
+        journey_happened = (travel_resolution or {}).get("status") in (
+            "arrived", "interrupted", "blocked", "abandoned")
+        if not journey_happened and not time_skip_resolution:
             elapsed_time_resolution = normalize_elapsed_time(
                 proposal, fallback_minutes=0 if opening_setup else 5,
                 max_minutes=0 if opening_setup else 360,

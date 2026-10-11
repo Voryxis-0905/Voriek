@@ -36,6 +36,22 @@ def find_location(location_map: dict, ref: str):
     return next((item for item in _locations(location_map) if _matches(item, ref)), None)
 
 
+
+def find_containing_location(location_map: dict, ref: str):
+    """Resolve a confirmed scene label to its longest known map location.
+
+    Destinations still use exact find_location matching. This only anchors a
+    player's existing room/corridor label when planning or comparing origins.
+    """
+    from app.world.boundaries import _is_location_in_zone
+    candidates = []
+    for place in _locations(location_map):
+        for name in (place.get("name"), place.get("id")):
+            if isinstance(name, str) and name and _is_location_in_zone(ref, {name}):
+                candidates.append((len(name), place))
+    return max(candidates, key=lambda pair: pair[0])[1] if candidates else None
+
+
 def visible_location_map(location_map: dict, current_location: str = "") -> dict:
     """The player's projection of a location map.
 
@@ -49,7 +65,7 @@ def visible_location_map(location_map: dict, current_location: str = "") -> dict
     journey the map would not show, and neither can drift from the other.
     """
     all_locations = _locations(location_map)
-    currently_here = find_location(location_map, current_location) if current_location else None
+    currently_here = find_containing_location(location_map, current_location) if current_location else None
     keep_ids = {
         loc.get("id") for loc in all_locations
         if not is_hidden(loc) or (currently_here and loc.get("id") == currently_here.get("id"))
@@ -107,7 +123,7 @@ def _neighbors(location: dict) -> list:
 
 
 def find_route(location_map: dict, start_ref: str, destination_ref: str):
-    start = find_location(location_map, start_ref)
+    start = find_containing_location(location_map, start_ref)
     destination = find_location(location_map, destination_ref)
     if not start or not destination:
         return None
@@ -148,7 +164,7 @@ def _edge_metadata(a: dict, b: dict) -> dict:
 def preview_travel(location_map: dict, current_location: str, destination_ref: str,
                    *, tick_minutes: int = 60) -> dict:
     destination = find_location(location_map, destination_ref)
-    start = find_location(location_map, current_location)
+    start = find_containing_location(location_map, current_location)
     if not destination:
         return {"status": "unknown_destination", "destination": destination_ref,
                 "elapsed_minutes": 0, "estimated_ticks": 0, "route": [], "legs": []}
@@ -344,7 +360,15 @@ def _continue_journey_plan(active_journey: dict, *, tick_minutes: int = 60):
 
 
 def build_travel_plan(user_input: str, location_map: dict, current_location: str,
-                      *, tick_minutes: int = 60, seed_key: str = "", active_journey=None):
+                      *, tick_minutes: int = 60, seed_key: str = "", active_journey=None,
+                      destination_id: str = ""):
+    """Resolve a travel input into a plan.
+
+    `destination_id` lets a caller that has already worked out the destination
+    (see `app.world.movement`, which recognises more phrasings than
+    `extract_travel_destination` does) skip the phrase-matching step without
+    changing what the phrase matcher accepts for everyone else.
+    """
     if re.match(r"^abandon\s+(?:the\s+)?journey[.!]?$", str(user_input or "").strip(), re.I):
         if isinstance(active_journey, dict) and active_journey.get("status") == "interrupted":
             return {"status": "abandoned", "reason": "player_abandoned_journey",
@@ -356,7 +380,9 @@ def build_travel_plan(user_input: str, location_map: dict, current_location: str
         return None
     if re.match(r"^continue\s+(?:the\s+)?journey[.!]?$", str(user_input or "").strip(), re.I):
         return _continue_journey_plan(active_journey, tick_minutes=tick_minutes)
-    destination = extract_travel_destination(user_input, location_map)
+    destination = find_location(location_map, destination_id) if destination_id else None
+    if not destination:
+        destination = extract_travel_destination(user_input, location_map)
     if not destination:
         return None
     result = preview_travel(location_map, current_location, destination.get("id"), tick_minutes=tick_minutes)

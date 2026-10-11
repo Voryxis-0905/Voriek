@@ -67,3 +67,18 @@ class SceneStateTests(unittest.TestCase):
         self.assertEqual(evidence["character_state_after_proposed_turn"]["pc"],
                          {"name": "Rinn", "location": "Supply Zone", "inventory": []})
         self.assertEqual(plan, original)
+
+    def test_arrival_retains_a_confirmed_precise_endpoint_inside_engine_destination(self):
+        evidence = self.project({'characters': {'pc': {'location': 'Supply Zone - Railway Platform'}}},
+                                travel_resolution={'status': 'arrived', 'destination': 'Supply Zone'})
+        self.assertEqual(evidence['character_state_after_proposed_turn']['pc']['location'],
+                         'Supply Zone - Railway Platform')
+
+    def test_interruption_retains_precise_stopping_point_without_crossing_zone(self):
+        good = self.project({'characters': {'pc': {'location': 'Base Zone (lift doorway)'}}},
+                            travel_resolution={'status': 'interrupted', 'stopped_at': 'Base Zone'})
+        self.assertEqual(good['character_state_after_proposed_turn']['pc']['location'],
+                         'Base Zone (lift doorway)')
+        wrong = self.project({'characters': {'pc': {'location': 'Supply Zone'}}},
+                             travel_resolution={'status': 'interrupted', 'stopped_at': 'Base Zone'})
+        self.assertEqual(wrong['character_state_after_proposed_turn']['pc']['location'], 'Base Zone')

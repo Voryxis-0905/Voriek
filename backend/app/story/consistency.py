@@ -119,6 +119,10 @@ def build_consistency_checker_payload(chapter_text: str, state_changes: dict,
                          else protagonist_after.get("location") if isinstance(protagonist_after, dict)
                          else None)
 
+    projected_after = outcomes.get("character_state_after_proposed_turn")
+    if isinstance(projected_after, dict):
+        expected_location = projected_after.get(protagonist_id, {}).get("location", expected_location)
+
     def clock_label(clock: dict) -> str:
         if not isinstance(clock, dict):
             return ""
